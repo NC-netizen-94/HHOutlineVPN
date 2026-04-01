@@ -5,7 +5,7 @@ import os
 import asyncio
 import re
 import html 
-from datetime import datetime, timedelta, time
+from datetime import datetime, timedelta, time, timezone
 from threading import Thread
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, BotCommandScopeDefault, BotCommandScopeChat, ReplyKeyboardMarkup
@@ -191,11 +191,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     get_or_create_user(user.id, username, referred_by)
     
     keyboard = [
-        [InlineKeyboardButton("🎁 Free 3GB အစမ်းသုံးရန်", callback_data='free_trial'), InlineKeyboardButton("❓ အသုံးပြုပုံ", callback_data='how_to_use')],
+        [InlineKeyboardButton("🎁 Free 3GB အစမ်းသုံးရန်", callback_data='free_trial')],
         [InlineKeyboardButton("🛒 Plan ဝယ်ရန်", callback_data='buy_plan'), InlineKeyboardButton("🔄 သက်တမ်းတိုးရန်", callback_data='extend_plan')],
-        [InlineKeyboardButton("👤 မိမိ၏ Plan/ Data မှတ်တမ်း", callback_data='my_plan'), InlineKeyboardButton("📝 အကြံပြုစာရေးရန်", callback_data='send_feedback')],
-        [InlineKeyboardButton("📢 သူငယ်ချင်းများသို့ မျှဝေရန်", callback_data='share_referral')],
-        [InlineKeyboardButton("👨‍💻 Admin ကို ဆက်သွယ်ရန်", url=ADMIN_CONTACT_LINK), InlineKeyboardButton("🌐 Facebook Page", url=FB_LINK)]
+        [InlineKeyboardButton("👤 Plan/Data စစ်ရန်", callback_data='my_plan'), InlineKeyboardButton("❓ အသုံးပြုပုံ", callback_data='how_to_use')],
+        [InlineKeyboardButton("📢 သူငယ်ချင်းများသို့ မျှဝေရန်", callback_data='share_referral'), InlineKeyboardButton("📝 အကြံပြုစာရေးရန်", callback_data='send_feedback')],
+        [InlineKeyboardButton("👨‍💻 Admin ကို ဆက်သွယ်ရန်", url=ADMIN_CONTACT_LINK)],
+        [InlineKeyboardButton("🌐 Facebook Page", url=FB_LINK)]
     ]
     
     welcome_text = (
@@ -204,7 +205,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🛡️ **Private & Secure:** လူထောင်ချီသုံးနေတဲ့ အခမဲ့ VPN တွေလို မဟုတ်ဘဲ၊ သီးသန့် Private Server ကို အသုံးပြုထားလို့ လိုင်းကျတာ၊ ချိတ်မရတာ လုံးဝမရှိပါဘူး။\n"
         "⚡️ **High Speed:** ကမ္ဘာ့အကောင်းဆုံး AWS Server များဖြစ်လို့ ရုပ်ရှင်ကြည့်၊ ဂိမ်းဆော့၊ ဒေါင်းလုဒ်ဆွဲ... အထစ်အငေါ့မရှိ အမြန်နှုန်း အပြည့်ရပါမယ်။\n"
         "🔒 **100% Safe:** လူကြီးမင်း၏ ကိုယ်ရေးအချက်အလက်များကို လုံးဝ မှတ်သားထားခြင်း (No Logs) မရှိလို့ ယုံကြည်စိတ်ချစွာ အသုံးပြုနိုင်ပါတယ်။\n\n"
-        "👇 အောက်ပါ Menu များမှတဆင့် မိမိအသုံးပြုလိုသော ဝန်ဆောင်မှုကို ရွေးချယ်ပါ ခင်ဗျာ。"
+        "👇 အောက်ပါ Menu များမှတဆင့် မိမိအသုံးပြုလိုသော ဝန်ဆောင်မှုကို ရွေးချယ်ပါ ခင်ဗျာ။"
     )
     
     chat_id = update.effective_chat.id
@@ -546,7 +547,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         action_type = 'extend' if data == 'extend_plan' else 'buy'
         context.user_data['action_type'] = action_type
         
-        # 🌟 Plan ဈေးနှုန်းများကို Message Text တွင် ရှင်းလင်းစွာ ဖော်ပြရန် 🌟
         price_list_text = ""
         for k, v in plans_dict.items():
             price_list_text += f"▪️ {v['display']}\n"
@@ -732,8 +732,10 @@ def main():
     
     if app.job_queue:
         app.job_queue.run_repeating(check_expired_keys, interval=60, first=10)
-        # UTC 02:00 = မြန်မာစံတော်ချိန် 08:30 AM 
-        report_time = time(hour=2, minute=0, second=0)
+        
+        # 🌟 UTC +6:30 (Myanmar Time) ဖြင့် တိုက်ရိုက် သတ်မှတ်ခြင်း 🌟
+        mmt_tz = timezone(timedelta(hours=6, minutes=30))
+        report_time = time(hour=8, minute=30, tzinfo=mmt_tz) # မြန်မာစံတော်ချိန် မနက် ၈ နာရီခွဲ
         app.job_queue.run_daily(send_daily_report, time=report_time)
     
     app.add_handler(CommandHandler("start", start))
