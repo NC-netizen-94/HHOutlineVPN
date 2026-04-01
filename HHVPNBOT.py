@@ -28,7 +28,8 @@ def keep_alive():
     t.start()
 
 # --- Configuration ---
-BOT_TOKEN = "8633829411:AAGZ9Vd6uqmwpjvxdjWs3h6dF1Uc2osUd4I"
+# 🌟 အစ်ကိုပေးထားတဲ့ Token အသစ်ကို ထည့်သွင်းထားပါသည် 🌟
+BOT_TOKEN = "8633829411:AAEdkGteDuDt4fjJABAIR7jIMLVIPQ1PPhA"
 BOT_USERNAME = "HHVPN_bot" 
 ADMIN_ID = 1656832105
 FB_LINK = "https://facebook.com/HappyHiveVPN"
@@ -274,7 +275,6 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             access_url, key_name = generate_vpn_key(target_id, plan_info['plan_type'], plan_info['data_gb'], plan_info['months'])
             await update.message.reply_text(f"✅ **Manual Key အောင်မြင်စွာ ထုတ်ပေးလိုက်ပါပြီ။**\n\n👤 Name: `{key_name}`\n🔑 Access Key:\n`{access_url}`", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
             try:
-                # 🌟 Admin မှ Manual Key ထုတ်ပေးသော နေရာတွင် စာသားပြင်ဆင်ခြင်း 🌟
                 await context.bot.send_message(chat_id=target_id, text=f"🎉 **Admin မှ လူကြီးမင်း၏ VPN Plan ကို အတည်ပြုပေးလိုက်ပါပြီ။**\n\n👤 **Name:** `{key_name}`\n\n👇 **အောက်ပါ Key ကို Copy ကူးပြီး Outline VPN တွင် ထည့်သွင်းအသုံးပြုနိုင်ပါပြီ။**", parse_mode='Markdown')
                 await context.bot.send_message(chat_id=target_id, text=f"`{access_url}`", parse_mode='Markdown')
             except: pass
@@ -541,7 +541,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 conn.commit()
                 await safe_delete_message(query.message)
                 
-                # 🌟 Free Trial တွင် စာသားပြင်ဆင်ခြင်း 🌟
                 await context.bot.send_message(user_id, f"✅ **Free Trial 3GB ရရှိပါပြီ။**\n⏱ **(၅) ရက်တိတိ အသုံးပြုနိုင်ပါသည်။**\n\n👤 **Name:** `{name}`\n\n👇 **အောက်ပါ Key ကို Copy ကူးပြီး Outline VPN တွင် ထည့်သွင်းအသုံးပြုနိုင်ပါပြီ။**", reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
                 await context.bot.send_message(user_id, f"`{url}`", parse_mode='Markdown')
             except Exception as e: await query.edit_message_text(f"❌ Error: {e}")
@@ -647,7 +646,6 @@ async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_T
                     matched_key = next((k for k in client.get_keys() if str(k.key_id) == str(old_key_id)), None)
                     access_url = matched_key.access_url if matched_key else "Not Found"
                     
-                    # 🌟 သက်တမ်းတိုးသည့် နေရာတွင် စာသားပြင်ဆင်ခြင်း 🌟
                     user_msg = f"🎉 **သက်တမ်းတိုးခြင်း အောင်မြင်ပါသည်။**\n\nလူကြီးမင်း၏ လက်ရှိ VPN Key ထဲသို့ Data နှင့် သက်တမ်း ပေါင်းထည့်ပေးလိုက်ပါပြီ။ **App ထဲတွင် Key အသစ်ထပ်ထည့်ရန် မလိုအပ်ပါ။**\n\n⏳ **ကုန်ဆုံးမည့်ရက်အသစ်:** `{new_end.strftime('%Y-%m-%d')}`\n\n👇 **(အကယ်၍ Key ပျောက်သွားပါက အောက်ပါ Key ကို Copy ကူးပြီး ပြန်ထည့်နိုင်ပါသည်။)**"
                     await context.bot.send_message(target_user_id, user_msg, reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
                     await context.bot.send_message(target_user_id, f"`{access_url}`", parse_mode='Markdown')
@@ -658,7 +656,6 @@ async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_T
             if req_action == 'buy':
                 access_url, key_name = generate_vpn_key(target_user_id, plan_info['plan_type'], plan_info['data_gb'], plan_info['months'])
                 
-                # 🌟 ဝယ်ယူမှုအသစ် အတည်ပြုသည့် နေရာတွင် စာသားပြင်ဆင်ခြင်း 🌟
                 await context.bot.send_message(target_user_id, f"🎉 **ငွေသွင်းမှု အတည်ပြုပြီးပါပြီ။**\n\n👤 **Name:** `{key_name}`\n\n👇 **အောက်ပါ Key ကို Copy ကူးပြီး Outline VPN တွင် ထည့်သွင်းအသုံးပြုနိုင်ပါပြီ။**", reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
                 await context.bot.send_message(target_user_id, f"`{access_url}`", parse_mode='Markdown')
                 
