@@ -190,13 +190,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     get_or_create_user(user.id, username, referred_by)
     
+    # 🌟 Menu ခလုတ်များ ပြင်ဆင်ထားသော နေရာ 🌟
     keyboard = [
         [InlineKeyboardButton("🎁 Free 3GB အစမ်းသုံးရန်", callback_data='free_trial')],
         [InlineKeyboardButton("🛒 Plan ဝယ်ရန်", callback_data='buy_plan'), InlineKeyboardButton("🔄 သက်တမ်းတိုးရန်", callback_data='extend_plan')],
         [InlineKeyboardButton("👤 Plan/Data စစ်ရန်", callback_data='my_plan'), InlineKeyboardButton("❓ အသုံးပြုပုံ", callback_data='how_to_use')],
-        [InlineKeyboardButton("📢 သူငယ်ချင်းများသို့ မျှဝေရန်", callback_data='share_referral'), InlineKeyboardButton("📝 အကြံပြုစာရေးရန်", callback_data='send_feedback')],
-        [InlineKeyboardButton("👨‍💻 Admin ကို ဆက်သွယ်ရန်", url=ADMIN_CONTACT_LINK)],
-        [InlineKeyboardButton("🌐 Facebook Page", url=FB_LINK)]
+        [InlineKeyboardButton("📢 သူငယ်ချင်းများသို့ မျှဝေရန်", callback_data='share_referral'), InlineKeyboardButton("👨‍💻 Admin ကို ဆက်သွယ်ရန်", url=ADMIN_CONTACT_LINK)],
+        [InlineKeyboardButton("📝 အကြံပြုစာရေးရန်", callback_data='send_feedback'), InlineKeyboardButton("🌐 Facebook Page", url=FB_LINK)]
     ]
     
     welcome_text = (
@@ -205,7 +205,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🛡️ **Private & Secure:** လူထောင်ချီသုံးနေတဲ့ အခမဲ့ VPN တွေလို မဟုတ်ဘဲ၊ သီးသန့် Private Server ကို အသုံးပြုထားလို့ လိုင်းကျတာ၊ ချိတ်မရတာ လုံးဝမရှိပါဘူး။\n"
         "⚡️ **High Speed:** ကမ္ဘာ့အကောင်းဆုံး AWS Server များဖြစ်လို့ ရုပ်ရှင်ကြည့်၊ ဂိမ်းဆော့၊ ဒေါင်းလုဒ်ဆွဲ... အထစ်အငေါ့မရှိ အမြန်နှုန်း အပြည့်ရပါမယ်။\n"
         "🔒 **100% Safe:** လူကြီးမင်း၏ ကိုယ်ရေးအချက်အလက်များကို လုံးဝ မှတ်သားထားခြင်း (No Logs) မရှိလို့ ယုံကြည်စိတ်ချစွာ အသုံးပြုနိုင်ပါတယ်။\n\n"
-        "👇 အောက်ပါ Menu များမှတဆင့် မိမိအသုံးပြုလိုသော ဝန်ဆောင်မှုကို ရွေးချယ်ပါ ခင်ဗျာ။"
+        "👇 အောက်ပါ Menu များမှတဆင့် မိမိအသုံးပြုလိုသော ဝန်ဆောင်မှုကို ရွေးချယ်ပါ ခင်ဗျာ。"
     )
     
     chat_id = update.effective_chat.id
