@@ -547,15 +547,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data in ('buy_plan', 'extend_plan'):
         action_type = 'extend' if data == 'extend_plan' else 'buy'
         context.user_data['action_type'] = action_type
-        
-        price_list_text = ""
-        for k, v in plans_dict.items():
-            price_list_text += f"▪️ {v['display']}\n"
             
         if action_type == 'buy':
-            msg = f"🛒 **ဝယ်ယူလိုသော Plan ကို ရွေးချယ်ပါ:**\n\n{price_list_text}\n✅ **100% Full Speed:** ဝယ်ယူထားသော Data မကုန်မချင်း အမြန်နှုန်း အပြည့်ဖြင့် အသုံးပြုနိုင်ပါသည်။\n✅ **Smart Top-up:** သက်တမ်းမကုန်ခင် ထပ်ဝယ်ပါက Data အဟောင်းများ မပျောက်ဘဲ အလိုအလျောက် ထပ်ပေါင်းပေးမည် ဖြစ်ပါသည်။"
+            msg = "🛒 **ဝယ်ယူလိုသော Plan ကို ရွေးချယ်ပါ:**\n\n✅ **100% Full Speed:** ဝယ်ယူထားသော Data မကုန်မချင်း အမြန်နှုန်း အပြည့်ဖြင့် အသုံးပြုနိုင်ပါသည်။\n✅ **Smart Top-up:** သက်တမ်းမကုန်ခင် ထပ်ဝယ်ပါက Data အဟောင်းများ မပျောက်ဘဲ အလိုအလျောက် ထပ်ပေါင်းပေးမည် ဖြစ်ပါသည်။"
         else: 
-            msg = f"🔄 **သက်တမ်းတိုးရန် (သို့) Data ထပ်ဝယ်ရန် Plan ရွေးပါ:**\n\n{price_list_text}\n*(မှတ်ချက် - ယခုအသုံးပြုနေသော Key ထဲသို့သာ Data နှင့် သက်တမ်း ပေါင်းထည့်ပေးမည်ဖြစ်ပါသည်။)*"
+            msg = "🔄 **သက်တမ်းတိုးရန် (သို့) Data ထပ်ဝယ်ရန် Plan ရွေးပါ:**\n\n*(မှတ်ချက် - ယခုအသုံးပြုနေသော Key ထဲသို့သာ Data နှင့် သက်တမ်း ပေါင်းထည့်ပေးမည်ဖြစ်ပါသည်။)*"
             
         await query.edit_message_text(text=msg, reply_markup=get_plans_keyboard(plans_dict), parse_mode='Markdown')
         
