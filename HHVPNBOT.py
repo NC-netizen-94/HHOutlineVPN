@@ -5,7 +5,7 @@ import os
 import asyncio
 import re
 import html 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 from threading import Thread
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, BotCommandScopeDefault, BotCommandScopeChat, ReplyKeyboardMarkup
@@ -114,13 +114,10 @@ def get_plan_details():
 
 def get_plans_keyboard(plans_dict):
     keyboard = []
-    row = []
+    # 🌟 ဖုန်းစခရင်တွင် စာလုံးအဆုံးထိပေါ်စေရန် တစ်တန်းလျှင် ခလုတ် (၁) ခုသာ ထားပါသည် 🌟
     for p_key, p_info in plans_dict.items():
-        row.append(InlineKeyboardButton(p_info['display'], callback_data=p_key))
-        if len(row) == 2:
-            keyboard.append(row)
-            row = []
-    if row: keyboard.append(row)
+        keyboard.append([InlineKeyboardButton(p_info['display'], callback_data=p_key)])
+        
     keyboard.append([InlineKeyboardButton("🔙 Menu သို့ပြန်သွားရန်", callback_data='back_to_main')])
     return InlineKeyboardMarkup(keyboard)
 
@@ -157,6 +154,7 @@ def generate_vpn_key(telegram_id, plan_type, data_gb=None, months=None):
     c = conn.cursor()
     row = c.execute("SELECT unique_id, username FROM users WHERE telegram_id=?", (telegram_id,)).fetchone()
     unique_id, raw_username = row[0], row[1] if row[1] else "User"
+    
     safe_username = outline_safe_name(raw_username)
     new_key = client.create_key()
     
@@ -206,7 +204,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🛡️ **Private & Secure:** လူထောင်ချီသုံးနေတဲ့ အခမဲ့ VPN တွေလို မဟုတ်ဘဲ၊ သီးသန့် Private Server ကို အသုံးပြုထားလို့ လိုင်းကျတာ၊ ချိတ်မရတာ လုံးဝမရှိပါဘူး။\n"
         "⚡️ **High Speed:** ကမ္ဘာ့အကောင်းဆုံး AWS Server များဖြစ်လို့ ရုပ်ရှင်ကြည့်၊ ဂိမ်းဆော့၊ ဒေါင်းလုဒ်ဆွဲ... အထစ်အငေါ့မရှိ အမြန်နှုန်း အပြည့်ရပါမယ်။\n"
         "🔒 **100% Safe:** လူကြီးမင်း၏ ကိုယ်ရေးအချက်အလက်များကို လုံးဝ မှတ်သားထားခြင်း (No Logs) မရှိလို့ ယုံကြည်စိတ်ချစွာ အသုံးပြုနိုင်ပါတယ်။\n\n"
-        "👇 အောက်ပါ Menu များမှတဆင့် မိမိအသုံးပြုလိုသော ဝန်ဆောင်မှုကို ရွေးချယ်ပါ ခင်ဗျာ။"
+        "👇 အောက်ပါ Menu များမှတဆင့် မိမိအသုံးပြုလိုသော ဝန်ဆောင်မှုကို ရွေးချယ်ပါ ခင်ဗျာ。"
     )
     
     chat_id = update.effective_chat.id
@@ -351,7 +349,7 @@ async def send_rating_request(context: ContextTypes.DEFAULT_TYPE):
     user_id = context.job.data
     kb = [[InlineKeyboardButton("⭐", callback_data='rate_1'), InlineKeyboardButton("⭐⭐", callback_data='rate_2'), InlineKeyboardButton("⭐⭐⭐", callback_data='rate_3')],
           [InlineKeyboardButton("⭐⭐⭐⭐", callback_data='rate_4'), InlineKeyboardButton("⭐⭐⭐⭐⭐", callback_data='rate_5')]]
-    try: await context.bot.send_message(chat_id=user_id, text="🌟 **HappyHive VPN ကို အသုံးပြုရတာ အဆင်ပြေရဲ့လား ခင်ဗျာ?**\n\nလူကြီးမင်း၏ အတွေ့အကြုံကို အောက်ပါ ကြယ်လေးတွေနှိပ်ပြီး အမှတ်ပေး အကဲဖြတ်ပေးပါဦး ခင်ဗျာ။", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
+    try: await context.bot.send_message(chat_id=user_id, text="🌟 **HappyHive VPN ကို အသုံးပြုရတာ အဆင်ပြေရဲ့လား ခင်ဗျာ?**\n\nလူကြီးမင်း၏ အတွေ့အကြုံကို အောက်ပါ ကြယ်လေးတွေနှိပ်ပြီး အမှတ်ပေး အကဲဖြတ်ပေးပါဦး ခင်ဗျာ。", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
     except: pass
 
 async def send_htu_guide(query, context, os_type):
@@ -547,9 +545,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data in ('buy_plan', 'extend_plan'):
         action_type = 'extend' if data == 'extend_plan' else 'buy'
         context.user_data['action_type'] = action_type
+        
+        # 🌟 Plan ဈေးနှုန်းများကို Message Text တွင် ရှင်းလင်းစွာ ဖော်ပြရန် 🌟
+        price_list_text = ""
+        for k, v in plans_dict.items():
+            price_list_text += f"▪️ {v['display']}\n"
+            
         if action_type == 'buy':
-            msg = "🛒 **ဝယ်ယူလိုသော Plan ကို ရွေးချယ်ပါ:**\n\n✅ **100% Full Speed:** ဝယ်ယူထားသော Data မကုန်မချင်း အမြန်နှုန်း အပြည့်ဖြင့် အသုံးပြုနိုင်ပါသည်။\n✅ **Smart Top-up:** သက်တမ်းမကုန်ခင် ထပ်ဝယ်ပါက Data အဟောင်းများ မပျောက်ဘဲ အလိုအလျောက် ထပ်ပေါင်းပေးမည် ဖြစ်ပါသည်။"
-        else: msg = "🔄 **သက်တမ်းတိုးရန် (သို့) Data ထပ်ဝယ်ရန် Plan ရွေးပါ:**\n*(မှတ်ချက် - ယခုအသုံးပြုနေသော Key ထဲသို့သာ Data နှင့် သက်တမ်း ပေါင်းထည့်ပေးမည်ဖြစ်ပါသည်။)*"
+            msg = f"🛒 **ဝယ်ယူလိုသော Plan ကို ရွေးချယ်ပါ:**\n\n{price_list_text}\n✅ **100% Full Speed:** ဝယ်ယူထားသော Data မကုန်မချင်း အမြန်နှုန်း အပြည့်ဖြင့် အသုံးပြုနိုင်ပါသည်။\n✅ **Smart Top-up:** သက်တမ်းမကုန်ခင် ထပ်ဝယ်ပါက Data အဟောင်းများ မပျောက်ဘဲ အလိုအလျောက် ထပ်ပေါင်းပေးမည် ဖြစ်ပါသည်။"
+        else: 
+            msg = f"🔄 **သက်တမ်းတိုးရန် (သို့) Data ထပ်ဝယ်ရန် Plan ရွေးပါ:**\n\n{price_list_text}\n*(မှတ်ချက် - ယခုအသုံးပြုနေသော Key ထဲသို့သာ Data နှင့် သက်တမ်း ပေါင်းထည့်ပေးမည်ဖြစ်ပါသည်။)*"
+            
         await query.edit_message_text(text=msg, reply_markup=get_plans_keyboard(plans_dict), parse_mode='Markdown')
         
     elif data == 'my_plan':
@@ -695,6 +701,17 @@ async def check_expired_keys(context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
     conn.close()
 
+# --- Daily Admin Report Handler ---
+async def send_daily_report(context: ContextTypes.DEFAULT_TYPE):
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_ID, 
+            text="✅ **Daily Status Report**\n\nBot is running perfectly. Have a great day!", 
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logging.error(f"Failed to send daily report: {e}")
+
 # --- Global Error Handler ---
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logging.error(msg="Exception while handling an update:", exc_info=context.error)
@@ -710,11 +727,14 @@ def main():
     keep_alive()
     print("✅ Web Server is running on port 10000...")
 
-    # 🌟 Telegram Bot Initialization (job_queue ပြင်ဆင်ပြီး)
+    # 🌟 Telegram Bot Initialization
     app = Application.builder().token(BOT_TOKEN).job_queue(None).post_init(post_init).build()
     
     if app.job_queue:
         app.job_queue.run_repeating(check_expired_keys, interval=60, first=10)
+        # UTC 02:00 = မြန်မာစံတော်ချိန် 08:30 AM 
+        report_time = time(hour=2, minute=0, second=0)
+        app.job_queue.run_daily(send_daily_report, time=report_time)
     
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("admin", admin_panel))
