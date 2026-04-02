@@ -28,7 +28,6 @@ def keep_alive():
     t.start()
 
 # --- Configuration ---
-# 🌟 အစ်ကိုပေးထားတဲ့ Token အသစ်ကို ထည့်သွင်းထားပါသည် 🌟
 BOT_TOKEN = "8633829411:AAEdkGteDuDt4fjJABAIR7jIMLVIPQ1PPhA"
 BOT_USERNAME = "HHVPN_bot" 
 ADMIN_ID = 1656832105
@@ -90,16 +89,18 @@ def init_db():
     c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('outline_cert_sha256', '15AABC7E72C56F04C1DB2953ABD078D0ECAC4DF72F59C83D3090015882D0954A')")
     c.execute('''CREATE TABLE IF NOT EXISTS plan_configs (plan_key TEXT PRIMARY KEY, short_name TEXT, display_name TEXT, plan_type TEXT, data_gb INTEGER, months INTEGER)''')
     
+    # 🌟 Emoji များဖြုတ်ထားပြီး အတိုဆုံးဖြစ်အောင် ပြင်ဆင်ထားပါသည် 🌟
     default_plans = [
-        ('plan_10gb', '10GB Plan', '📦 10GB Plan (၁လ) - ၈၀၀ ကျပ်', '10GB', 10, 1),
-        ('plan_20gb', '20GB Plan', '📦 20GB Plan (၁လ) - ၁,၂၀၀ ကျပ်', '20GB', 20, 1),
-        ('plan_30gb', '30GB Plan', '📦 30GB Plan (၁လ) - ၁,၅၀၀ ကျပ်', '30GB', 30, 1),
-        ('plan_40gb', '40GB Plan', '📦 40GB Plan (၁လ) - ၂,၀၀၀ ကျပ်', '40GB', 40, 1),
-        ('plan_50gb', '50GB Plan', '📦 50GB Plan (၁လ) - ၃,၀၀၀ ကျပ်', '50GB', 50, 1),
-        ('plan_100gb', '100GB Plan', '📦 100GB Plan (၁လ) - ၄,၀၀၀ ကျပ်', '100GB', 100, 1)
+        ('plan_10gb', '10GB Plan', '10GB (၁လ) - ၈၀၀', '10GB', 10, 1),
+        ('plan_20gb', '20GB Plan', '20GB (၁လ) - ၁၂၀၀', '20GB', 20, 1),
+        ('plan_30gb', '30GB Plan', '30GB (၁လ) - ၁၅၀၀', '30GB', 30, 1),
+        ('plan_40gb', '40GB Plan', '40GB (၁လ) - ၂၀၀၀', '40GB', 40, 1),
+        ('plan_50gb', '50GB Plan', '50GB (၁လ) - ၃၀၀၀', '50GB', 50, 1),
+        ('plan_100gb', '100GB Plan', '100GB (၁လ) - ၄၀၀၀', '100GB', 100, 1)
     ]
+    # REPLACE သုံးထားသဖြင့် Run တာနဲ့ Database ထဲမှာ အလိုလို Update ဖြစ်သွားပါမည်
     for p in default_plans:
-        c.execute("INSERT OR IGNORE INTO plan_configs VALUES (?, ?, ?, ?, ?, ?)", p)
+        c.execute("INSERT OR REPLACE INTO plan_configs VALUES (?, ?, ?, ?, ?, ?)", p)
     conn.commit()
     conn.close()
 
@@ -115,7 +116,6 @@ def get_plan_details():
 
 def get_plans_keyboard(plans_dict):
     keyboard = []
-    # ဖုန်းစခရင်တွင် စာလုံးအဆုံးထိပေါ်စေရန် တစ်တန်းလျှင် ခလုတ် (၁) ခုသာ ထားပါသည်
     for p_key, p_info in plans_dict.items():
         keyboard.append([InlineKeyboardButton(p_info['display'], callback_data=p_key)])
         
@@ -191,7 +191,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     get_or_create_user(user.id, username, referred_by)
     
-    # 🌟 Menu ခလုတ်များ ပြင်ဆင်ထားသော နေရာ 🌟
     keyboard = [
         [InlineKeyboardButton("🎁 Free 3GB အစမ်းသုံးရန်", callback_data='free_trial')],
         [InlineKeyboardButton("🛒 Plan ဝယ်ရန်", callback_data='buy_plan'), InlineKeyboardButton("🔄 သက်တမ်းတိုးရန်", callback_data='extend_plan')],
