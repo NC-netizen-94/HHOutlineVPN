@@ -5,6 +5,7 @@ import os
 import asyncio
 import re
 import html
+import urllib.parse
 from datetime import datetime, timedelta, time, timezone
 from threading import Thread
 from flask import Flask
@@ -30,7 +31,7 @@ def keep_alive():
 # --- Configuration ---
 BOT_TOKEN = "8633829411:AAEdkGteDuDt4fjJABAIR7jIMLVIPQ1PPhA"
 BOT_USERNAME = "HHVPN_bot" 
-ADMIN_IDS = [1656832105] 
+ADMIN_IDS = [1656832105, 1640264253] 
 FB_LINK = "https://facebook.com/HappyHiveVPN"
 ADMIN_CONTACT_LINK = "https://t.me/HappyHive9496"
 
@@ -149,6 +150,7 @@ def get_bottom_keyboard(user_id):
     btns = [["🏠 ပင်မ မီနူးသို့သွားပါ", "🛡️ Admin Panel"]] if user_id in ADMIN_IDS else [["🏠 ပင်မ မီနူးသို့သွားပါ"]]
     return ReplyKeyboardMarkup(btns, resize_keyboard=True, is_persistent=True)
 
+# 🌟 Key အသစ်ထုတ်ပေးတိုင်း Outline App တွင် နာမည်ပေါ်မည့် Format အသစ် 🌟
 def generate_vpn_key(telegram_id, plan_type, data_gb=None, months=None):
     client = get_outline_client()
     conn = sqlite3.connect('happyhive.db', check_same_thread=False)
@@ -156,7 +158,6 @@ def generate_vpn_key(telegram_id, plan_type, data_gb=None, months=None):
     row = c.execute("SELECT unique_id, username FROM users WHERE telegram_id=?", (telegram_id,)).fetchone()
     unique_id, raw_username = row[0], row[1] if row[1] else "User"
     
-    safe_username = outline_safe_name(raw_username)
     new_key = client.create_key()
     
     start_date = datetime.now()
@@ -164,7 +165,13 @@ def generate_vpn_key(telegram_id, plan_type, data_gb=None, months=None):
     end_date = start_date + timedelta(days=5) if plan_type == "FreeTrial" else (start_date + timedelta(days=30 * months) if months else None)
     db_end_date = end_date.strftime("%Y-%m-%d %H:%M:%S") if end_date else None
     
-    suffix = f"HHVPN_{telegram_id}_{safe_username}_{unique_id}_{plan_type}_{start_date.strftime('%Y-%m-%d')}" + (f"_{end_date.strftime('%Y-%m-%d')}" if end_date else "")
+    # 🌟 Format: PlanName_BuyDate_ExpDate_UserID_KeyID
+    start_str = start_date.strftime('%Y-%m-%d')
+    end_str = end_date.strftime('%Y-%m-%d') if end_date else "NoExp"
+    
+    suffix = f"{plan_type}_{start_str}_{end_str}_{telegram_id}_Key{new_key.key_id}"
+    
+    # Outline Server ပေါ်တွင် နာမည်ပြောင်းပေးမည်
     client.rename_key(new_key.key_id, suffix)
     
     data_bytes = data_gb * 1e9 if data_gb else None
@@ -174,7 +181,10 @@ def generate_vpn_key(telegram_id, plan_type, data_gb=None, months=None):
     conn.commit()
     conn.close()
     
-    return f"{new_key.access_url.split('#')[0]}#{suffix}", suffix
+    # URL တွင် # နောက်မှ စာသားကို သေချာဖတ်နိုင်ရန် URL Encode လုပ်ပေးမည်
+    final_url = f"{new_key.access_url.split('#')[0]}#{urllib.parse.quote(suffix)}"
+    
+    return final_url, suffix
 
 # --- Handlers ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -195,7 +205,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🎁 Free 3GB အစမ်းသုံးရန်", callback_data='free_trial')],
         [InlineKeyboardButton("🛒 Plan ဝယ်ရန်", callback_data='buy_plan'), InlineKeyboardButton("🔄 သက်တမ်းတိုးရန်", callback_data='extend_plan')],
         [InlineKeyboardButton("👤 Plan/Data စစ်ရန်", callback_data='my_plan'), InlineKeyboardButton("❓ အသုံးပြုပုံ", callback_data='how_to_use')],
-        [InlineKeyboardButton("📢 သူငယ်ချင်းများသို့ မျှဝေပီး 1GB free ယူရန်", callback_data='share_referral')],
+        [InlineKeyboardButton("📢 သူငယ်ချင်းများသို့ မျှဝေရန်", callback_data='share_referral')],
         [InlineKeyboardButton("📝 အကြံပြုစာရေးရန်", callback_data='send_feedback'), InlineKeyboardButton("🌐 Facebook Page", url=FB_LINK)],
         [InlineKeyboardButton("👨‍💻 Admin ကို ဆက်သွယ်ရန်", url=ADMIN_CONTACT_LINK)]
     ]
@@ -589,7 +599,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             with open(PAYMENT_QR_PATH, 'rb') as f: await context.bot.send_photo(user_id, f, reply_markup=BACK_TO_MAIN_MARKUP)
         else: await context.bot.send_message(user_id, "*(⚠️ QR Code မရှိပါ)*", reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
 
-# 🌟 Payment ပို့သောအခါ Pending ID ဖန်တီး၍ Admin များထံသို့ ပို့သည့်စနစ် 🌟
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_name = get_user_display_name(update.effective_user)
@@ -600,7 +609,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         disp = get_plan_details().get(plan, {}).get('short_name', plan)
         action_str = "Extend Plan (သက်တမ်းတိုး)" if action_type == 'extend' else "Buy New Plan (ဝယ်ယူမှုအသစ်)"
         
-        # Payment ID တစ်ခု သီးသန့်ထုတ်လုပ်ခြင်း
         payment_id = str(uuid.uuid4())[:8]
         if 'payments' not in context.bot_data:
             context.bot_data['payments'] = {}
@@ -610,10 +618,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'plan_key': plan,
             'action_type': action_type,
             'user_name': user_name,
-            'msgs': [] # Admin များကို ပို့ထားသော Message ID များ မှတ်သားရန်
+            'msgs': []
         }
         
-        # Callback တွင် Payment ID ကို ထည့်ထားခြင်း
         kb = [
             [InlineKeyboardButton("✅ Approve & Send Key", callback_data=f"pay_app_{payment_id}")], 
             [InlineKeyboardButton("❌ Reject", callback_data=f"pay_rej_{payment_id}")]
@@ -622,14 +629,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for admin in ADMIN_IDS:
             try: 
                 msg = await context.bot.send_photo(admin, photo=photo_id, caption=f"🔔 <b>New Payment!</b>\n\n👤 User: {get_mention(user_id, user_name)}\n📦 Plan: <code>{disp}</code>\n⚡ Action: <b>{action_str}</b>", reply_markup=InlineKeyboardMarkup(kb), parse_mode='HTML')
-                # Message ID ကို မှတ်သားထားမည်
                 context.bot_data['payments'][payment_id]['msgs'].append((admin, msg.message_id))
             except: pass
             
         await update.message.reply_text("✅ ငွေလွှဲပြေစာကို Admin ထံ ပို့ဆောင်ပြီးပါပြီ။")
     else: await update.message.reply_text("⚠️ ကျေးဇူးပြု၍ Plan အရင်ရွေးချယ်ပြီးမှ Screenshot ပို့ပေးပါ။")
 
-# 🌟 Admin (၁) ယောက်က နှိပ်လိုက်သည်နှင့် ကျန်သူများဆီပါ ခလုတ်ပျောက်သွားမည့် စနစ် 🌟
 async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -637,12 +642,11 @@ async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_T
     if not query.data.startswith("pay_"): return
     
     parts = query.data.split("_")
-    action_code = parts[1] # 'app' (Approve) သို့မဟုတ် 'rej' (Reject)
+    action_code = parts[1]
     payment_id = parts[2]
     
     payment_info = context.bot_data.get('payments', {}).get(payment_id)
     
-    # အခြား Admin က နှိပ်ပြီးသွားပြီဆိုလျှင် (စနစ်ထဲတွင် မှတ်တမ်းမရှိတော့လျှင်)
     if not payment_info:
         try: await query.edit_message_caption(caption=f"{query.message.caption_html}\n\n⚠️ <b>ဤပြေစာကို အခြား Admin မှ လုပ်ဆောင်ပြီးဖြစ်ပါသည်။</b>", parse_mode='HTML')
         except: pass
@@ -655,12 +659,10 @@ async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_T
     admin_name = get_user_display_name(query.from_user)
     msgs_to_edit = payment_info['msgs']
     
-    # Race condition မဖြစ်စေရန် Data ကို ချက်ချင်း ဖျက်လိုက်ပါသည်
     del context.bot_data['payments'][payment_id]
     
     status_text = f"✅ Approved by {admin_name}" if action_code == 'app' else f"❌ Rejected by {admin_name}"
     
-    # 🌟 Admin အားလုံး၏ ဖုန်းထဲမှ ခလုတ်များကို ချက်ချင်းဖျောက်ပြီး စာသားပြင်ပေးမည် 🌟
     for adm_id, msg_id in msgs_to_edit:
         try:
             await context.bot.edit_message_caption(
@@ -671,7 +673,6 @@ async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_T
             )
         except Exception as e: logging.error(f"Failed to edit admin msg: {e}")
         
-    # ထို့နောက်မှသာ ပုံမှန် Outline လုပ်ဆောင်ချက်များကို ဆက်လုပ်မည်
     conn = sqlite3.connect('happyhive.db', check_same_thread=False)
     c = conn.cursor()
     row = c.execute("SELECT has_rated FROM users WHERE telegram_id=?", (target_user_id,)).fetchone()
@@ -684,9 +685,9 @@ async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_T
         try:
             client = get_outline_client()
             if req_action == 'extend':
-                active_plan = c.execute("SELECT key_id, data_limit, end_date FROM plans WHERE telegram_id=? AND is_active=1 ORDER BY id DESC LIMIT 1", (target_user_id,)).fetchone()
+                active_plan = c.execute("SELECT key_id, data_limit, end_date, start_date, plan_type FROM plans WHERE telegram_id=? AND is_active=1 ORDER BY id DESC LIMIT 1", (target_user_id,)).fetchone()
                 if active_plan:
-                    old_key_id, old_limit, old_end_date = active_plan
+                    old_key_id, old_limit, old_end_date, old_start_date, old_plan_type = active_plan
                     new_data_bytes = (plan_info['data_gb'] * 1e9) if plan_info['data_gb'] else 0
                     total_new_limit = (old_limit or 0) + new_data_bytes
                     current_end = datetime.now()
@@ -700,8 +701,19 @@ async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_T
                     c.execute("UPDATE plans SET data_limit=?, end_date=? WHERE key_id=?", (int(total_new_limit), new_end_str, old_key_id))
                     conn.commit()
                     
+                    # 🌟 Extend လုပ်သည့်အခါလည်း Format အသစ်ဖြင့် နာမည်ပြန်ချိန်းပေးမည် 🌟
+                    start_str = old_start_date[:10] if old_start_date else datetime.now().strftime('%Y-%m-%d')
+                    end_str = new_end.strftime('%Y-%m-%d')
+                    new_suffix = f"{old_plan_type}_{start_str}_{end_str}_{target_user_id}_Key{old_key_id}"
+                    
+                    try: client.rename_key(old_key_id, new_suffix)
+                    except: pass
+                    
                     matched_key = next((k for k in client.get_keys() if str(k.key_id) == str(old_key_id)), None)
-                    access_url = matched_key.access_url if matched_key else "Not Found"
+                    if matched_key:
+                        access_url = f"{matched_key.access_url.split('#')[0]}#{urllib.parse.quote(new_suffix)}"
+                    else:
+                        access_url = "Not Found"
                     
                     user_msg = f"🎉 **သက်တမ်းတိုးခြင်း အောင်မြင်ပါသည်။**\n\nလူကြီးမင်း၏ လက်ရှိ VPN Key ထဲသို့ Data နှင့် သက်တမ်း ပေါင်းထည့်ပေးလိုက်ပါပြီ။ **App ထဲတွင် Key အသစ်ထပ်ထည့်ရန် မလိုအပ်ပါ။**\n\n⏳ **ကုန်ဆုံးမည့်ရက်အသစ်:** `{new_end.strftime('%Y-%m-%d')}`\n\n👇 **(အကယ်၍ Key ပျောက်သွားပါက အောက်ပါ Key ကို Copy ကူးပြီး ပြန်ထည့်နိုင်ပါသည်။)**"
                     await context.bot.send_message(target_user_id, user_msg, reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
@@ -714,7 +726,7 @@ async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_T
                 
                 await context.bot.send_message(target_user_id, f"🎉 **ငွေသွင်းမှု အတည်ပြုပြီးပါပြီ။**\n\n👤 **Name:** `{key_name}`\n\n👇 **အောက်ပါ Key ကို Copy ကူးပြီး Outline VPN တွင် ထည့်သွင်းအသုံးပြုနိုင်ပါပြီ။**", reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
                 await context.bot.send_message(target_user_id, f"`{access_url}`", parse_mode='Markdown')
-                
+                    
                 if has_rated == 0:
                     if context.job_queue: context.job_queue.run_once(send_rating_request, 3600, data=target_user_id)
                     c.execute("UPDATE users SET has_rated=1 WHERE telegram_id=?", (target_user_id,))
@@ -809,7 +821,6 @@ def main():
     app.add_handler(CommandHandler("deluser", delete_user_command)) 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     
-    # 🌟 Handler အသစ် (Pattern ပြောင်းထားသည်) 🌟
     app.add_handler(CallbackQueryHandler(admin_approval_handler, pattern="^pay_(app|rej)_"))
     
     app.add_handler(CallbackQueryHandler(button_handler))
