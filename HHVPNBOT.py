@@ -116,15 +116,9 @@ def get_plan_details():
 
 def get_plans_keyboard(plans_dict):
     keyboard = []
-    row = []
-    # 🌟 ခလုတ်များကို ၂ ခုစီ ဘေးတိုက် (side-by-side) စီပေးမည့် နေရာ 🌟
+    # 🌟 ဖုန်းစခရင်တွင် စာလုံးအဆုံးထိပေါ်စေရန် တစ်တန်းလျှင် ခလုတ် (၁) ခုသာ ပြန်ထားပါသည် (Undo) 🌟
     for p_key, p_info in plans_dict.items():
-        row.append(InlineKeyboardButton(p_info['display'], callback_data=p_key))
-        if len(row) == 2:
-            keyboard.append(row)
-            row = []
-    if row: # ကျန်နေခဲ့သော ခလုတ် (မစုံပါက) ထည့်ရန်
-        keyboard.append(row)
+        keyboard.append([InlineKeyboardButton(p_info['display'], callback_data=p_key)])
         
     keyboard.append([InlineKeyboardButton("🔙 Menu သို့ပြန်သွားရန်", callback_data='back_to_main')])
     return InlineKeyboardMarkup(keyboard)
