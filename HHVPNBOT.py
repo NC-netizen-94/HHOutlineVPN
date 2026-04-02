@@ -30,7 +30,7 @@ def keep_alive():
 # --- Configuration ---
 BOT_TOKEN = "8633829411:AAEdkGteDuDt4fjJABAIR7jIMLVIPQ1PPhA"
 BOT_USERNAME = "HHVPN_bot" 
-ADMIN_IDS = [1656832105, 1640264253] 
+ADMIN_IDS = [1656832105] 
 FB_LINK = "https://facebook.com/HappyHiveVPN"
 ADMIN_CONTACT_LINK = "https://t.me/HappyHive9496"
 
