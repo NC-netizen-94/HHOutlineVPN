@@ -213,9 +213,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     get_or_create_user(user.id, username, referred_by)
     
+    # 🌟 သက်တမ်းတိုးရန် ခလုတ်ကို ဖြုတ်ထားပါသည် 🌟
     keyboard = [
         [InlineKeyboardButton("🎁 Free 3GB အစမ်းသုံးရန်", callback_data='free_trial')],
-        [InlineKeyboardButton("🛒 Plan ဝယ်ရန်", callback_data='buy_plan'), InlineKeyboardButton("🔄 သက်တမ်းတိုးရန်", callback_data='extend_plan')],
+        [InlineKeyboardButton("🛒 Plan ဝယ်ရန်", callback_data='buy_plan')],
         [InlineKeyboardButton("👤 Plan/Data စစ်ရန်", callback_data='my_plan'), InlineKeyboardButton("❓ အသုံးပြုပုံ", callback_data='how_to_use')],
         [InlineKeyboardButton("📢 သူငယ်ချင်းများသို့ မျှဝေရန်", callback_data='share_referral')],
         [InlineKeyboardButton("📝 အကြံပြုစာရေးရန်", callback_data='send_feedback'), InlineKeyboardButton("🌐 Facebook Page", url=FB_LINK)],
@@ -456,7 +457,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await query.edit_message_text(text=msg, reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
 
-    # 🌟 NEW CLOUD BACKUP SYSTEM 🌟
     elif data == 'admin_manual_backup':
         await query.edit_message_text("⏳ Cloud Database အား Backup ယူနေပါသည်... ခဏစောင့်ပါ။")
         try:
@@ -482,7 +482,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 caption = f"📦 <b>Cloud Database Backup</b>\n📅 <code>{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</code>\n\n✅ Neon Cloud မှ Data အားလုံးကို JSON ဖိုင်အဖြစ် ထုတ်ယူထားခြင်း ဖြစ်ပါသည်။"
                 await context.bot.send_document(chat_id=user_id, document=f, caption=caption, parse_mode='HTML')
                 
-            os.remove(filename)  # ဖိုင်ပို့ပြီးတာနဲ့ Server ပေါ်ကနေ ချက်ချင်း ပြန်ဖျက်မည်
+            os.remove(filename)
             await query.edit_message_text("✅ **Cloud Backup အား လူကြီးမင်းထံသို့ အောင်မြင်စွာ ပေးပို့လိုက်ပါပြီ။**", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
         except Exception as e:
             await query.edit_message_text(f"❌ Error ဖြစ်နေပါသည်: {e}", reply_markup=BACK_TO_ADMIN_MARKUP)
@@ -706,15 +706,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e: await query.edit_message_text(f"❌ Error: {e}")
         conn.close()
 
-    elif data in ('buy_plan', 'extend_plan'):
-        action_type = 'extend' if data == 'extend_plan' else 'buy'
-        context.user_data['action_type'] = action_type
-            
-        if action_type == 'buy':
-            msg = "🛒 **ဝယ်ယူလိုသော Plan ကို ရွေးချယ်ပါ:**\n\n✅ **100% Full Speed:** ဝယ်ယူထားသော Data မကုန်မချင်း အမြန်နှုန်း အပြည့်ဖြင့် အသုံးပြုနိုင်ပါသည်။\n✅ **Smart Top-up:** သက်တမ်းမကုန်ခင် ထပ်ဝယ်ပါက Data အဟောင်းများ မပျောက်ဘဲ အလိုအလျောက် ထပ်ပေါင်းပေးမည် ဖြစ်ပါသည်။"
-        else: 
-            msg = "🔄 **သက်တမ်းတိုးရန် (သို့) Data ထပ်ဝယ်ရန် Plan ရွေးပါ:**\n\n*(မှတ်ချက် - ယခုအသုံးပြုနေသော Key ထဲသို့သာ Data နှင့် သက်တမ်း ပေါင်းထည့်ပေးမည်ဖြစ်ပါသည်။)*"
-            
+    # 🌟 ဝယ်ယူရန် တစ်ခုတည်းသာ ထားရှိခြင်း 🌟
+    elif data == 'buy_plan':
+        context.user_data['action_type'] = 'buy'
+        msg = "🛒 **ဝယ်ယူလိုသော Plan ကို ရွေးချယ်ပါ:**\n\n✅ **100% Full Speed:** ဝယ်ယူထားသော Data မကုန်မချင်း အမြန်နှုန်း အပြည့်ဖြင့် အသုံးပြုနိုင်ပါသည်။"
         await query.edit_message_text(text=msg, reply_markup=get_plans_keyboard(plans_dict), parse_mode='Markdown')
         
     elif data == 'my_plan':
@@ -740,7 +735,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data in plans_dict:
         context.user_data['pending_plan'] = data
-        if 'action_type' not in context.user_data: context.user_data['action_type'] = 'buy'
+        context.user_data['action_type'] = 'buy'
         await safe_delete_message(query.message)
         await context.bot.send_message(user_id, "💰 **ငွေပေးချေရန် အချက်အလက်များ**\n\nအောက်ပါ KPay သို့ ငွေလွှဲပါ။\n📝 **Note မှာ shopping လို့ရေးပေးပါ**\n\n👤 Name: `Nyein Chan`\n\n📸 **ငွေလွှဲပြေစာ (Screenshot)** ကို ပို့ပေးပါ။", parse_mode='Markdown')
         await context.bot.send_message(user_id, "`09799844344`", parse_mode='Markdown')
@@ -756,7 +751,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         action_type = context.user_data.pop('action_type', 'buy')
         photo_id = update.message.photo[-1].file_id
         disp = get_plan_details().get(plan, {}).get('short_name', plan)
-        action_str = "Extend Plan (သက်တမ်းတိုး)" if action_type == 'extend' else "Buy New Plan (ဝယ်ယူမှုအသစ်)"
+        
+        action_str = "Buy New Plan (ဝယ်ယူမှုအသစ်)"
         
         payment_id = str(uuid.uuid4())[:8]
         if 'payments' not in context.bot_data:
@@ -803,7 +799,6 @@ async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_T
         
     target_user_id = payment_info['user_id']
     plan_key = payment_info['plan_key']
-    req_action = payment_info['action_type']
     target_uname = payment_info['user_name']
     admin_name = get_user_display_name(query.from_user)
     msgs_to_edit = payment_info['msgs']
@@ -833,58 +828,22 @@ async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_T
         if not plan_info: return conn.close()
             
         try:
-            client = get_outline_client()
-            if req_action == 'extend':
-                c.execute("SELECT key_id, data_limit, end_date, start_date, plan_type FROM plans WHERE telegram_id=%s AND is_active=1 ORDER BY id DESC LIMIT 1", (target_user_id,))
-                active_plan = c.fetchone()
-                if active_plan:
-                    old_key_id, old_limit, old_end_date, old_start_date, old_plan_type = active_plan
-                    new_data_bytes = (plan_info['data_gb'] * 1e9) if plan_info['data_gb'] else 0
-                    total_new_limit = (old_limit or 0) + new_data_bytes
-                    current_end = datetime.now()
-                    if old_end_date:
-                        old_end_dt = datetime.strptime(old_end_date, "%Y-%m-%d %H:%M:%S")
-                        if old_end_dt > datetime.now(): current_end = old_end_dt
-                    new_end = current_end + timedelta(days=30 * plan_info['months'])
-                    new_end_str = new_end.strftime("%Y-%m-%d %H:%M:%S")
-                    
-                    if total_new_limit > 0: client.add_data_limit(old_key_id, int(total_new_limit))
-                    c.execute("UPDATE plans SET data_limit=%s, end_date=%s WHERE key_id=%s", (int(total_new_limit), new_end_str, old_key_id))
-                    
-                    start_str = old_start_date[:10] if old_start_date else datetime.now().strftime('%Y-%m-%d')
-                    end_str = new_end.strftime('%Y-%m-%d')
-                    new_suffix = f"{old_plan_type}_{start_str}_{end_str}_{target_user_id}_Key{old_key_id}"
-                    
-                    try: client.rename_key(old_key_id, new_suffix)
-                    except: pass
-                    
-                    matched_key = next((k for k in client.get_keys() if str(k.key_id) == str(old_key_id)), None)
-                    if matched_key:
-                        access_url = f"{matched_key.access_url.split('#')[0]}#{urllib.parse.quote(new_suffix)}"
-                    else:
-                        access_url = "Not Found"
-                    
-                    user_msg = f"🎉 **သက်တမ်းတိုးခြင်း အောင်မြင်ပါသည်။**\n\nလူကြီးမင်း၏ လက်ရှိ VPN Key ထဲသို့ Data နှင့် သက်တမ်း ပေါင်းထည့်ပေးလိုက်ပါပြီ။ **App ထဲတွင် Key အသစ်ထပ်ထည့်ရန် မလိုအပ်ပါ။**\n\n⏳ **ကုန်ဆုံးမည့်ရက်အသစ်:** `{new_end.strftime('%Y-%m-%d')}`\n\n👇 **(အကယ်၍ Key ပျောက်သွားပါက အောက်ပါ Key ကို Copy ကူးပြီး ပြန်ထည့်နိုင်ပါသည်။)**"
-                    await context.bot.send_message(target_user_id, user_msg, reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
-                    await context.bot.send_message(target_user_id, f"`{access_url}`", parse_mode='Markdown')
-                    await send_auto_backup(context, target_user_id, target_uname, "Plan သက်တမ်းတိုးပေး")
-                else: req_action = 'buy'
+            # 🌟 သက်တမ်းတိုး (Extend) ကို ဖြုတ်လိုက်ပြီး "အသစ်ဝယ်ယူခြင်း" သီးသန့်ဖြစ်သွားပါပြီ 🌟
+            access_url, key_name = generate_vpn_key(target_user_id, plan_info['plan_type'], plan_info['data_gb'], plan_info['months'])
             
-            if req_action == 'buy':
-                access_url, key_name = generate_vpn_key(target_user_id, plan_info['plan_type'], plan_info['data_gb'], plan_info['months'])
+            await context.bot.send_message(target_user_id, f"🎉 **ငွေသွင်းမှု အတည်ပြုပြီးပါပြီ။**\n\n👤 **Name:** `{key_name}`\n\n👇 **အောက်ပါ Key ကို Copy ကူးပြီး Outline VPN တွင် ထည့်သွင်းအသုံးပြုနိုင်ပါပြီ။**", reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
+            await context.bot.send_message(target_user_id, f"`{access_url}`", parse_mode='Markdown')
                 
-                await context.bot.send_message(target_user_id, f"🎉 **ငွေသွင်းမှု အတည်ပြုပြီးပါပြီ။**\n\n👤 **Name:** `{key_name}`\n\n👇 **အောက်ပါ Key ကို Copy ကူးပြီး Outline VPN တွင် ထည့်သွင်းအသုံးပြုနိုင်ပါပြီ။**", reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
-                await context.bot.send_message(target_user_id, f"`{access_url}`", parse_mode='Markdown')
-                    
-                if has_rated == 0:
-                    if context.job_queue: context.job_queue.run_once(send_rating_request, 3600, data=target_user_id)
-                    c.execute("UPDATE users SET has_rated=1 WHERE telegram_id=%s", (target_user_id,))
-                await send_auto_backup(context, target_user_id, target_uname, "Plan အသစ် ချပေး")
+            if has_rated == 0:
+                if context.job_queue: context.job_queue.run_once(send_rating_request, 3600, data=target_user_id)
+                c.execute("UPDATE users SET has_rated=1 WHERE telegram_id=%s", (target_user_id,))
+            await send_auto_backup(context, target_user_id, target_uname, "Plan အသစ် ချပေး")
 
             c.execute("SELECT referred_by, referral_reward_claimed FROM users WHERE telegram_id=%s", (target_user_id,))
             ref_data = c.fetchone()
             if ref_data and ref_data[0] and ref_data[1] == 0:
                 referrer_id = ref_data[0]
+                client = get_outline_client()
                 c.execute("SELECT key_id, data_limit FROM plans WHERE telegram_id=%s AND is_active=1 ORDER BY id DESC LIMIT 1", (referrer_id,))
                 ref_plan = c.fetchone()
                 if ref_plan and ref_plan[1]:
@@ -922,6 +881,7 @@ async def check_expired_keys(context: ContextTypes.DEFAULT_TYPE):
                     try: await context.bot.send_message(admin, f"♻️ Auto-deleted <code>{kid}</code> for {get_mention(tid, uname)} (<code>{ptype}</code>).", parse_mode='HTML')
                     except: pass
             except: pass
+        conn.commit()
     conn.close()
 
 # --- Daily Admin Report Handler ---
