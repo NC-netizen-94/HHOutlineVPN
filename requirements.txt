@@ -2,3 +2,4 @@ flask
 python-telegram-bot[job-queue]
 outline-vpn-api
 boto3
+psycopg2-binary
