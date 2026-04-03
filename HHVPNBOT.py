@@ -5,6 +5,7 @@ import asyncio
 import re
 import html
 import urllib.parse
+import json
 import psycopg2
 from psycopg2.extras import DictCursor
 from datetime import datetime, timedelta, time, timezone
@@ -254,8 +255,9 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("👥 View Users Plans", callback_data='admin_view_users'), InlineKeyboardButton("⚠️ Expiring Soon", callback_data='admin_expiring')],
         [InlineKeyboardButton("➕ Manual Key ထုတ်ရန်", callback_data='admin_manual_key'), InlineKeyboardButton("📝 Plan အမည်များ ပြင်ရန်", callback_data='admin_edit_plans')],
         [InlineKeyboardButton("📊 စီးပွားရေးနှင့် Server အခြေအနေ", callback_data='admin_server_stats'), InlineKeyboardButton("💽 Server Storage ပြင်ရန်", callback_data='admin_change_storage')],
-        [InlineKeyboardButton("☁️ AWS ချိတ်ဆက်ရန်", callback_data='admin_aws_setup'), InlineKeyboardButton("📢 Broadcast", callback_data='admin_broadcast')],
-        [InlineKeyboardButton("⚙️ Change API", callback_data='admin_change_api'), InlineKeyboardButton("🗑️ စနစ်တစ်ခုလုံး Reset ချရန်", callback_data='admin_reset_system')]
+        [InlineKeyboardButton("☁️ AWS ချိတ်ဆက်ရန်", callback_data='admin_aws_setup'), InlineKeyboardButton("💾 Database Backup ယူရန်", callback_data='admin_manual_backup')],
+        [InlineKeyboardButton("📢 Broadcast", callback_data='admin_broadcast'), InlineKeyboardButton("⚙️ Change API", callback_data='admin_change_api')],
+        [InlineKeyboardButton("🗑️ စနစ်တစ်ခုလုံး Reset ချရန်", callback_data='admin_reset_system')]
     ]
     msg = "🛡️ **Admin Panel ရောက်ပါပြီ။**\n👇 လုပ်ဆောင်လိုသော မီနူးကို ရွေးချယ်ပါ။"
     if update.message: await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
@@ -454,6 +456,37 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await query.edit_message_text(text=msg, reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
 
+    # 🌟 NEW CLOUD BACKUP SYSTEM 🌟
+    elif data == 'admin_manual_backup':
+        await query.edit_message_text("⏳ Cloud Database အား Backup ယူနေပါသည်... ခဏစောင့်ပါ။")
+        try:
+            conn = get_db()
+            c = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            
+            backup_data = {}
+            tables_to_backup = ['users', 'plans', 'settings', 'plan_configs']
+            
+            for table in tables_to_backup:
+                c.execute(f"SELECT * FROM {table}")
+                rows = c.fetchall()
+                backup_data[table] = [dict(row) for row in rows]
+                
+            conn.close()
+            
+            filename = f"HHVPN_Cloud_Backup_{datetime.now().strftime('%Y%m%d_%H%M')}.json"
+            
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(backup_data, f, ensure_ascii=False, indent=4)
+                
+            with open(filename, 'rb') as f:
+                caption = f"📦 <b>Cloud Database Backup</b>\n📅 <code>{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</code>\n\n✅ Neon Cloud မှ Data အားလုံးကို JSON ဖိုင်အဖြစ် ထုတ်ယူထားခြင်း ဖြစ်ပါသည်။"
+                await context.bot.send_document(chat_id=user_id, document=f, caption=caption, parse_mode='HTML')
+                
+            os.remove(filename)  # ဖိုင်ပို့ပြီးတာနဲ့ Server ပေါ်ကနေ ချက်ချင်း ပြန်ဖျက်မည်
+            await query.edit_message_text("✅ **Cloud Backup အား လူကြီးမင်းထံသို့ အောင်မြင်စွာ ပေးပို့လိုက်ပါပြီ။**", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
+        except Exception as e:
+            await query.edit_message_text(f"❌ Error ဖြစ်နေပါသည်: {e}", reply_markup=BACK_TO_ADMIN_MARKUP)
+
     elif data == 'share_referral':
         ref_link = f"https://t.me/{BOT_USERNAME}?start={user_id}"
         share_url = f"https://t.me/share/url?url={ref_link}&text=🌟 မြန်နှုန်းမြင့်ပြီး လုံခြုံစိတ်ချရတဲ့ HappyHive VPN ကို အသုံးပြုကြည့်ဖို့ ဖိတ်ခေါ်ပါတယ် ခင်ဗျာ။ အောက်ပါလင့်ခ်မှတဆင့် ဝင်ရောက်ပါ 👇"
@@ -494,7 +527,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 for kid in all_keys:
                     try: client.delete_key(kid[0])
                     except: pass
-            c.execute("TRUNCATE TABLE plans, users RESTART IDENTITY")
+            c.execute("TRUNCATE TABLE plans, users RESTART IDENTITY CASCADE")
             conn.close()
             await query.edit_message_text("✅ **စနစ်တစ်ခုလုံးကို အောင်မြင်စွာ Reset ချလိုက်ပါပြီ။**", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
         except Exception as e: await query.edit_message_text(f"❌ Error ဖြစ်နေပါသည်: {e}", reply_markup=BACK_TO_ADMIN_MARKUP)
@@ -868,6 +901,7 @@ async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_T
                 except: pass
     elif action_code == "rej":
         await context.bot.send_message(target_user_id, "❌ **ငွေသွင်းမှု မအောင်မြင်ပါ။**\n\nငွေသွင်းပြေစာ မှားယွင်းနေပါသည်။", reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
+    conn.commit()
     conn.close()
 
 async def check_expired_keys(context: ContextTypes.DEFAULT_TYPE):
