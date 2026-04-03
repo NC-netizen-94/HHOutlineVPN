@@ -13,6 +13,13 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotComm
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from outline_vpn.outline_vpn import OutlineVPN
 
+# --- AWS Boto3 Library ကို စစ်ဆေးခြင်း ---
+try:
+    import boto3
+    BOTO3_AVAILABLE = True
+except ImportError:
+    BOTO3_AVAILABLE = False
+
 # --- Flask Web Server for Render Health Check ---
 app_web = Flask('')
 
@@ -91,13 +98,11 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''')
     c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('outline_api_url', 'https://52.74.77.216:3584/j55zpDNtFPRSEVGYYK__XQ')")
     c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('outline_cert_sha256', '15AABC7E72C56F04C1DB2953ABD078D0ECAC4DF72F59C83D3090015882D0954A')")
-    
     c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('total_server_gb', '2000')")
     
     c.execute('''CREATE TABLE IF NOT EXISTS plan_configs (plan_key TEXT PRIMARY KEY, short_name TEXT, display_name TEXT, plan_type TEXT, data_gb INTEGER, months INTEGER)''')
     
     c.execute("DELETE FROM plan_configs")
-    
     default_plans = [
         ('plan_30gb', '30GB Plan', '30GB (၁လ) - ၂၀၀၀ကျပ်', '30GB', 30, 1),
         ('plan_50gb', '50GB Plan', '50GB (၁လ) - ၃၀၀၀ကျပ်', '50GB', 50, 1),
@@ -153,6 +158,7 @@ def get_bottom_keyboard(user_id):
     btns = [["🏠 ပင်မ မီနူးသို့သွားပါ", "🛡️ Admin Panel"]] if user_id in ADMIN_IDS else [["🏠 ပင်မ မီနူးသို့သွားပါ"]]
     return ReplyKeyboardMarkup(btns, resize_keyboard=True, is_persistent=True)
 
+# 🌟 Format အသစ်ဖြင့် Key ထုတ်ပေးခြင်း 🌟
 def generate_vpn_key(telegram_id, plan_type, data_gb=None, months=None):
     client = get_outline_client()
     conn = sqlite3.connect('happyhive.db', check_same_thread=False)
@@ -170,6 +176,7 @@ def generate_vpn_key(telegram_id, plan_type, data_gb=None, months=None):
     start_str = start_date.strftime('%Y-%m-%d')
     end_str = end_date.strftime('%Y-%m-%d') if end_date else "NoExp"
     
+    # Format: PlanName_BuyDate_ExpDate_UserID_KeyID
     suffix = f"{plan_type}_{start_str}_{end_str}_{telegram_id}_Key{new_key.key_id}"
     
     client.rename_key(new_key.key_id, suffix)
@@ -238,13 +245,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS: return
-    # 🌟 Backup ခလုတ်အသစ် ထည့်သွင်းခြင်း 🌟
     keyboard = [
         [InlineKeyboardButton("👥 View Users Plans", callback_data='admin_view_users'), InlineKeyboardButton("⚠️ Expiring Soon", callback_data='admin_expiring')],
         [InlineKeyboardButton("➕ Manual Key ထုတ်ရန်", callback_data='admin_manual_key'), InlineKeyboardButton("📝 Plan အမည်များ ပြင်ရန်", callback_data='admin_edit_plans')],
         [InlineKeyboardButton("📊 စီးပွားရေးနှင့် Server အခြေအနေ", callback_data='admin_server_stats'), InlineKeyboardButton("💽 Server Storage ပြင်ရန်", callback_data='admin_change_storage')],
-        [InlineKeyboardButton("💾 Database Backup ယူရန်", callback_data='admin_manual_backup'), InlineKeyboardButton("📢 Broadcast", callback_data='admin_broadcast')],
-        [InlineKeyboardButton("⚙️ Change API", callback_data='admin_change_api'), InlineKeyboardButton("🗑️ စနစ်တစ်ခုလုံး Reset ချရန်", callback_data='admin_reset_system')]
+        [InlineKeyboardButton("💾 Database Backup ယူရန်", callback_data='admin_manual_backup'), InlineKeyboardButton("☁️ AWS ချိတ်ဆက်ရန်", callback_data='admin_aws_setup')],
+        [InlineKeyboardButton("📢 Broadcast", callback_data='admin_broadcast'), InlineKeyboardButton("⚙️ Change API", callback_data='admin_change_api')],
+        [InlineKeyboardButton("🗑️ စနစ်တစ်ခုလုံး Reset ချရန်", callback_data='admin_reset_system')]
     ]
     msg = "🛡️ **Admin Panel ရောက်ပါပြီ။**\n👇 လုပ်ဆောင်လိုသော မီနူးကို ရွေးချယ်ပါ။"
     if update.message: await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
@@ -305,6 +312,24 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"✅ Server ၏ Storage ကို **{new_gb} GB** အဖြစ် အောင်မြင်စွာ ပြောင်းလဲသတ်မှတ်လိုက်ပါပြီ။\n\n(ယခုမှစ၍ 📊 စီးပွားရေးနှင့် Server အခြေအနေ တွင် Storage Limit အသစ်ဖြင့် တွက်ချက်ပြသပါမည်)", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
         except ValueError:
             await update.message.reply_text("❌ ကျေးဇူးပြု၍ Storage ပမာဏကို ဂဏန်းသက်သက်သာ ရိုက်ထည့်ပါ။ (ဥပမာ - 1000, 2000)", parse_mode='Markdown')
+
+    elif state == 'waiting_for_aws_setup' and update.effective_user.id in ADMIN_IDS:
+        parts = text.split('|')
+        if len(parts) != 4:
+            return await update.message.reply_text("❌ Format မှားယွင်းနေပါသည်။ \n`AccessKey | SecretKey | ap-southeast-1 | InstanceName` ပုံစံဖြင့် မှန်ကန်စွာ ရိုက်ထည့်ပါ။", parse_mode='Markdown')
+        
+        ak, sk, reg, iname = map(str.strip, parts)
+        conn = sqlite3.connect('happyhive.db', check_same_thread=False)
+        c = conn.cursor()
+        c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('aws_access_key', ?)", (ak,))
+        c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('aws_secret_key', ?)", (sk,))
+        c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('aws_region', ?)", (reg,))
+        c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('aws_instance_name', ?)", (iname,))
+        conn.commit()
+        conn.close()
+        
+        del context.user_data['state']
+        await update.message.reply_text("✅ AWS အချက်အလက်များ အောင်မြင်စွာ မှတ်သားပြီးပါပြီ။ 'စီးပွားရေးနှင့် Server အခြေအနေ' တွင် သွားရောက်စစ်ဆေးနိုင်ပါသည်။", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
 
     elif state and state.startswith('waiting_for_plan_name_') and update.effective_user.id in ADMIN_IDS:
         plan_key = state.replace('waiting_for_plan_name_', '')
@@ -410,7 +435,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_delete_message(query.message)
         return await start(update, context)
 
-    # 🌟 Manual Backup Function အသစ် 🌟
+    elif data == 'admin_aws_setup':
+        context.user_data['state'] = 'waiting_for_aws_setup'
+        msg = (
+            "☁️ **AWS ချိတ်ဆက်ရန်**\n\n"
+            "AWS IAM မှ ရရှိသော အချက်အလက်များကို `|` ခံ၍ အောက်ပါအတိုင်း ရိုက်ထည့်ပါ။\n"
+            "`AccessKey | SecretKey | Region | InstanceName`\n\n"
+            "📌 ဥပမာ - `AKIA... | wJalrX... | ap-southeast-1 | HHVPN-Server`"
+        )
+        await query.edit_message_text(text=msg, reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
+
     elif data == 'admin_manual_backup':
         await query.edit_message_text("⏳ Database အား Backup ယူနေပါသည်... ခဏစောင့်ပါ။")
         try:
@@ -441,7 +475,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn = sqlite3.connect('happyhive.db', check_same_thread=False)
         row = conn.cursor().execute("SELECT value FROM settings WHERE key='total_server_gb'").fetchone()
         conn.close()
-        current_gb = row[0] if row else "1000"
+        current_gb = row[0] if row else "2000"
         
         msg = f"💽 **Server Storage ပြင်ရန်**\n\nလက်ရှိ Server ၏ စုစုပေါင်း Data ပမာဏမှာ **{current_gb} GB** ဖြစ်ပါသည်။\n\nပမာဏအသစ် ပြောင်းလဲသတ်မှတ်လိုပါက အောက်တွင် ဂဏန်းသက်သက်ဖြင့် ရိုက်ထည့်ပါ။\n\n*(ဥပမာ: 1TB ဆိုလျှင် `1000` ဟု ရိုက်ပါ၊ 2TB ဆိုလျှင် `2000` ဟု ရိုက်ပါ)*"
         await query.edit_message_text(text=msg, reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
@@ -481,20 +515,25 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text="⏳ ငွေကြေးနှင့် Server Data များကို တွက်ချက်နေပါသည်...")
         try:
             conn = sqlite3.connect('happyhive.db', check_same_thread=False)
-            all_plans = conn.cursor().execute("SELECT plan_type, start_date FROM plans WHERE start_date IS NOT NULL AND plan_type != 'FreeTrial'").fetchall()
-            active_plans = conn.cursor().execute("SELECT data_limit FROM plans WHERE is_active=1 AND plan_type != 'FreeTrial'").fetchall()
+            c = conn.cursor()
+            all_plans = c.execute("SELECT plan_type, start_date FROM plans WHERE start_date IS NOT NULL AND plan_type != 'FreeTrial'").fetchall()
+            active_plans = c.execute("SELECT data_limit FROM plans WHERE is_active=1 AND plan_type != 'FreeTrial'").fetchall()
             
-            row_gb = conn.cursor().execute("SELECT value FROM settings WHERE key='total_server_gb'").fetchone()
+            row_gb = c.execute("SELECT value FROM settings WHERE key='total_server_gb'").fetchone()
+            total_server_gb = int(row_gb[0]) if row_gb else 2000
+            
+            aws_ak = c.execute("SELECT value FROM settings WHERE key='aws_access_key'").fetchone()
+            aws_sk = c.execute("SELECT value FROM settings WHERE key='aws_secret_key'").fetchone()
+            aws_reg = c.execute("SELECT value FROM settings WHERE key='aws_region'").fetchone()
+            aws_iname = c.execute("SELECT value FROM settings WHERE key='aws_instance_name'").fetchone()
             conn.close()
             
-            total_server_gb = int(row_gb[0]) if row_gb else 1000
-            
             PLAN_PRICES = {'30GB': 2000, '50GB': 3000, '100GB': 4000}
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             current_m, current_y, current_m_num = now.strftime("%Y-%m"), now.strftime("%Y"), now.month
             
-            monthly_rev = sum(PLAN_PRICES.get(p[0], 0) for p in all_plans if p[1].startswith(current_m))
-            yearly_rev = sum(PLAN_PRICES.get(p[0], 0) for p in all_plans if p[1].startswith(current_y))
+            monthly_rev = sum(PLAN_PRICES.get(p[0], 0) for p in all_plans if p[1][:7] == current_m)
+            yearly_rev = sum(PLAN_PRICES.get(p[0], 0) for p in all_plans if p[1][:4] == current_y)
             monthly_profit, yearly_profit = monthly_rev - 25000, yearly_rev - (25000 * current_m_num)
             
             def get_status(p): return f"🟢 မြတ် (<b>+{p:,}</b>)" if p > 0 else (f"⚪️ အရင်းကြေ (<b>0</b>)" if p == 0 else f"🔴 ရှုံး (<b>{p:,}</b>)")
@@ -509,11 +548,34 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             srv_status = f"🔴 <b>DANGER:</b> Server အသစ် အမြန်ဝယ်ရန် လိုအပ်နေပါပြီ။" if total_used_gb >= danger_limit else (f"🟡 <b>WARNING:</b> မကြာမီ Server အသစ်ဝယ်ရန် ပြင်ဆင်ထားပါ။" if total_used_gb >= warning_limit else "🟢 <b>NORMAL:</b> Server အခြေအနေ ကောင်းမွန်ပါသေးသည်။")
             
+            aws_status_text = "☁️ AWS Data: `မချိတ်ရသေးပါ` (Menu တွင် ချိတ်ဆက်ပါ)"
+            if BOTO3_AVAILABLE and aws_ak and aws_sk and aws_reg and aws_iname:
+                try:
+                    boto_client = boto3.client('lightsail', region_name=aws_reg[0], aws_access_key_id=aws_ak[0], aws_secret_access_key=aws_sk[0])
+                    start_time = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+                    
+                    response = boto_client.get_instance_metric_data(
+                        instanceName=aws_iname[0],
+                        metricName='NetworkOut',
+                        period=86400,
+                        startTime=start_time,
+                        endTime=now,
+                        unit='Bytes',
+                        statistics=['Sum']
+                    )
+                    aws_bytes = sum(dp.get('sum', 0) for dp in response.get('metricData', []))
+                    aws_gb = aws_bytes / (1024**3)
+                    aws_status_text = f"☁️ AWS အမှန်တကယ်ထွက်ရှိမှု (NetworkOut): <b>{aws_gb:.2f} GB</b>"
+                except Exception as e:
+                    aws_status_text = f"☁️ AWS Error: <code>{str(e)}</code>"
+            elif not BOTO3_AVAILABLE:
+                aws_status_text = "☁️ AWS Data: ⚠️ <code>boto3</code> ကို requirements.txt တွင် ထည့်ပါ။"
+
             msg = (
                 f"📊 <b>စီးပွားရေးနှင့် Server အခြေအနေ (Stats)</b>\n\n"
                 f"📅 <b>ယခုလစာရင်း ({now.strftime('%B')}):</b>\n▪️ လစဉ် အရင်း: <code>25,000 ကျပ်</code>\n▪️ ယခုလ ဝင်ငွေ: <code>{monthly_rev:,} ကျပ်</code>\n▪️ အခြေအနေ: {get_status(monthly_profit)} ကျပ်\n\n"
                 f"📆 <b>ယခုနှစ်စာရင်း (YTD):</b>\n▪️ နှစ်စဉ် အရင်း: <code>{25000 * current_m_num:,} ကျပ်</code>\n▪️ ယခုနှစ် ဝင်ငွေ: <code>{yearly_rev:,} ကျပ်</code>\n▪️ အခြေအနေ: {get_status(yearly_profit)} ကျပ်\n\n"
-                f"💽 <b>Server Data အခြေအနေ:</b>\n▪️ Active Keys: <code>{len(keys)} ခု</code>\n▪️ ရောင်းချထားသော Data: <code>{total_allocated_gb:.2f} GB</code>\n▪️ အမှန်တကယ် သုံးစွဲမှု: <code>{total_used_gb:.2f} GB</code> / <b>{total_server_gb} GB</b>\n\n💡 <b>အကြံပြုချက်:</b>\n{srv_status}"
+                f"💽 <b>Server Data အခြေအနေ:</b>\n▪️ Active Keys: <code>{len(keys)} ခု</code>\n▪️ ရောင်းချထားသော Data: <code>{total_allocated_gb:.2f} GB</code>\n▪️ Outline တွက်ချက်မှု: <code>{total_used_gb:.2f} GB</code> / <b>{total_server_gb} GB</b>\n{aws_status_text}\n\n💡 <b>အကြံပြုချက်:</b>\n{srv_status}"
             )
             await query.edit_message_text(text=msg, reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='HTML')
         except Exception as e: await query.edit_message_text(text=f"❌ Error: {e}", reply_markup=BACK_TO_ADMIN_MARKUP)
