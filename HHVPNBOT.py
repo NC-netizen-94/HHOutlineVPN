@@ -1,11 +1,12 @@
 import logging
-import sqlite3
 import uuid
 import os
 import asyncio
 import re
 import html
 import urllib.parse
+import psycopg2
+from psycopg2.extras import DictCursor
 from datetime import datetime, timedelta, time, timezone
 from threading import Thread
 from flask import Flask
@@ -13,19 +14,29 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotComm
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from outline_vpn.outline_vpn import OutlineVPN
 
-# --- AWS Boto3 Library ကို စစ်ဆေးခြင်း ---
+# --- AWS Boto3 Library ---
 try:
     import boto3
     BOTO3_AVAILABLE = True
 except ImportError:
     BOTO3_AVAILABLE = False
 
-# --- Flask Web Server for Render Health Check ---
+# --- PostgreSQL Connection ---
+DB_URL = os.environ.get('DATABASE_URL')
+
+def get_db():
+    if not DB_URL:
+        raise ValueError("DATABASE_URL Environment Variable is missing! Please add it in Render.")
+    conn = psycopg2.connect(DB_URL)
+    conn.autocommit = True
+    return conn
+
+# --- Flask Web Server ---
 app_web = Flask('')
 
 @app_web.route('/')
 def home():
-    return "Bot is Alive!"
+    return "Bot is Alive & Cloud DB is Active!"
 
 def run_web():
     port = int(os.environ.get("PORT", 10000))
@@ -64,17 +75,13 @@ async def safe_delete_message(message):
 
 async def send_auto_backup(context: ContextTypes.DEFAULT_TYPE, target_id: int, target_uname: str, action_text: str):
     try:
-        if os.path.exists('happyhive.db'):
-            caption = f"📦 <b>Auto Backup</b>\n{get_mention(target_id, target_uname)} သို့ {action_text}ပြီးနောက် သိမ်းဆည်းထားသော အချက်အလက်များ။"
-            for admin in ADMIN_IDS:
-                try:
-                    with open('happyhive.db', 'rb') as db_file:
-                        await context.bot.send_document(admin, db_file, caption=caption, parse_mode='HTML')
-                except: pass
+        caption = f"☁️ <b>Cloud Sync Successful</b>\n{get_mention(target_id, target_uname)} သို့ {action_text}ပြီးနောက် အချက်အလက်များကို လုံခြုံစွာ Cloud တွင် သိမ်းဆည်းလိုက်ပါပြီ။"
+        for admin in ADMIN_IDS:
+            try: await context.bot.send_message(admin, text=caption, parse_mode='HTML')
+            except: pass
     except Exception as e:
-        logging.error(f"Backup failed: {e}")
+        logging.error(f"Backup alert failed: {e}")
 
-# --- USERNAME & MENTION HELPERS ---
 def get_user_display_name(user):
     if user.username: return f"@{user.username}"
     elif user.first_name: return user.first_name
@@ -89,18 +96,22 @@ def outline_safe_name(text):
     cleaned = re.sub(r'[^a-zA-Z0-9_]', '', str(text).replace(" ", "_"))
     return cleaned if cleaned else "User"
 
-# --- Database Setup ---
+# --- Database Setup (PostgreSQL) ---
 def init_db():
-    conn = sqlite3.connect('happyhive.db', check_same_thread=False)
+    conn = get_db()
     c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS users (telegram_id INTEGER PRIMARY KEY, unique_id TEXT, is_trial_used INTEGER, username TEXT, referred_by INTEGER, referral_reward_claimed INTEGER DEFAULT 0, has_rated INTEGER DEFAULT 0)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS plans (id INTEGER PRIMARY KEY AUTOINCREMENT, telegram_id INTEGER, key_id TEXT, plan_type TEXT, data_limit INTEGER, start_date TEXT, end_date TEXT, is_active INTEGER, username TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS users (telegram_id BIGINT PRIMARY KEY, unique_id TEXT, is_trial_used INT, username TEXT, referred_by BIGINT, referral_reward_claimed INT DEFAULT 0, has_rated INT DEFAULT 0)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS plans (id SERIAL PRIMARY KEY, telegram_id BIGINT, key_id TEXT, plan_type TEXT, data_limit BIGINT, start_date TEXT, end_date TEXT, is_active INT, username TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''')
-    c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('outline_api_url', 'https://52.74.77.216:3584/j55zpDNtFPRSEVGYYK__XQ')")
-    c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('outline_cert_sha256', '15AABC7E72C56F04C1DB2953ABD078D0ECAC4DF72F59C83D3090015882D0954A')")
-    c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('total_server_gb', '2000')")
     
-    c.execute('''CREATE TABLE IF NOT EXISTS plan_configs (plan_key TEXT PRIMARY KEY, short_name TEXT, display_name TEXT, plan_type TEXT, data_gb INTEGER, months INTEGER)''')
+    upsert_query = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+    c.execute(upsert_query, ('outline_api_url', 'https://52.74.77.216:3584/j55zpDNtFPRSEVGYYK__XQ'))
+    c.execute(upsert_query, ('outline_cert_sha256', '15AABC7E72C56F04C1DB2953ABD078D0ECAC4DF72F59C83D3090015882D0954A'))
+    
+    ignore_query = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING"
+    c.execute(ignore_query, ('total_server_gb', '2000'))
+    
+    c.execute('''CREATE TABLE IF NOT EXISTS plan_configs (plan_key TEXT PRIMARY KEY, short_name TEXT, display_name TEXT, plan_type TEXT, data_gb INT, months INT)''')
     
     c.execute("DELETE FROM plan_configs")
     default_plans = [
@@ -109,14 +120,13 @@ def init_db():
         ('plan_100gb', '100GB Plan', '100GB (၁လ) - ၄၀၀၀ကျပ်', '100GB', 100, 1)
     ]
     for p in default_plans:
-        c.execute("INSERT INTO plan_configs VALUES (?, ?, ?, ?, ?, ?)", p)
-    conn.commit()
+        c.execute("INSERT INTO plan_configs VALUES (%s, %s, %s, %s, %s, %s)", p)
     conn.close()
 
 init_db()
 
 def get_plan_details():
-    conn = sqlite3.connect('happyhive.db', check_same_thread=False)
+    conn = get_db()
     c = conn.cursor()
     c.execute("SELECT plan_key, short_name, display_name, plan_type, data_gb, months FROM plan_configs")
     rows = c.fetchall()
@@ -127,30 +137,30 @@ def get_plans_keyboard(plans_dict):
     keyboard = []
     for p_key, p_info in plans_dict.items():
         keyboard.append([InlineKeyboardButton(p_info['display'], callback_data=p_key)])
-        
     keyboard.append([InlineKeyboardButton("🔙 Menu သို့ပြန်သွားရန်", callback_data='back_to_main')])
     return InlineKeyboardMarkup(keyboard)
 
 def get_outline_client():
-    conn = sqlite3.connect('happyhive.db', check_same_thread=False)
+    conn = get_db()
     c = conn.cursor()
-    api_url = c.execute("SELECT value FROM settings WHERE key='outline_api_url'").fetchone()[0]
-    cert_sha = c.execute("SELECT value FROM settings WHERE key='outline_cert_sha256'").fetchone()[0]
+    c.execute("SELECT value FROM settings WHERE key='outline_api_url'")
+    api_url = c.fetchone()[0]
+    c.execute("SELECT value FROM settings WHERE key='outline_cert_sha256'")
+    cert_sha = c.fetchone()[0]
     conn.close()
     return OutlineVPN(api_url=api_url, cert_sha256=cert_sha)
 
 def get_or_create_user(telegram_id, username="User", referred_by=None):
-    conn = sqlite3.connect('happyhive.db', check_same_thread=False)
+    conn = get_db()
     c = conn.cursor()
-    user = c.execute("SELECT unique_id, is_trial_used FROM users WHERE telegram_id=?", (telegram_id,)).fetchone()
+    c.execute("SELECT unique_id, is_trial_used FROM users WHERE telegram_id=%s", (telegram_id,))
+    user = c.fetchone()
     if not user:
         unique_id = str(uuid.uuid4())[:8].upper()
-        c.execute("INSERT INTO users (telegram_id, unique_id, is_trial_used, username, referred_by, referral_reward_claimed) VALUES (?, ?, 0, ?, ?, 0)", (telegram_id, unique_id, username, referred_by))
-        conn.commit()
+        c.execute("INSERT INTO users (telegram_id, unique_id, is_trial_used, username, referred_by, referral_reward_claimed) VALUES (%s, %s, 0, %s, %s, 0)", (telegram_id, unique_id, username, referred_by))
         user = (unique_id, 0)
     else:
-        c.execute("UPDATE users SET username=? WHERE telegram_id=?", (username, telegram_id))
-        conn.commit()
+        c.execute("UPDATE users SET username=%s WHERE telegram_id=%s", (username, telegram_id))
     conn.close()
     return user
 
@@ -158,16 +168,15 @@ def get_bottom_keyboard(user_id):
     btns = [["🏠 ပင်မ မီနူးသို့သွားပါ", "🛡️ Admin Panel"]] if user_id in ADMIN_IDS else [["🏠 ပင်မ မီနူးသို့သွားပါ"]]
     return ReplyKeyboardMarkup(btns, resize_keyboard=True, is_persistent=True)
 
-# 🌟 Format အသစ်ဖြင့် Key ထုတ်ပေးခြင်း 🌟
 def generate_vpn_key(telegram_id, plan_type, data_gb=None, months=None):
     client = get_outline_client()
-    conn = sqlite3.connect('happyhive.db', check_same_thread=False)
+    conn = get_db()
     c = conn.cursor()
-    row = c.execute("SELECT unique_id, username FROM users WHERE telegram_id=?", (telegram_id,)).fetchone()
+    c.execute("SELECT unique_id, username FROM users WHERE telegram_id=%s", (telegram_id,))
+    row = c.fetchone()
     unique_id, raw_username = row[0], row[1] if row[1] else "User"
     
     new_key = client.create_key()
-    
     start_date = datetime.now()
     db_start_date = start_date.strftime("%Y-%m-%d %H:%M:%S")
     end_date = start_date + timedelta(days=5) if plan_type == "FreeTrial" else (start_date + timedelta(days=30 * months) if months else None)
@@ -176,20 +185,16 @@ def generate_vpn_key(telegram_id, plan_type, data_gb=None, months=None):
     start_str = start_date.strftime('%Y-%m-%d')
     end_str = end_date.strftime('%Y-%m-%d') if end_date else "NoExp"
     
-    # Format: PlanName_BuyDate_ExpDate_UserID_KeyID
     suffix = f"{plan_type}_{start_str}_{end_str}_{telegram_id}_Key{new_key.key_id}"
-    
     client.rename_key(new_key.key_id, suffix)
     
     data_bytes = data_gb * 1e9 if data_gb else None
     if data_bytes: client.add_data_limit(new_key.key_id, int(data_bytes))
     
-    c.execute('''INSERT INTO plans (telegram_id, key_id, plan_type, data_limit, start_date, end_date, is_active, username) VALUES (?, ?, ?, ?, ?, ?, 1, ?)''', (telegram_id, new_key.key_id, plan_type, data_bytes, db_start_date, db_end_date, raw_username))
-    conn.commit()
+    c.execute('''INSERT INTO plans (telegram_id, key_id, plan_type, data_limit, start_date, end_date, is_active, username) VALUES (%s, %s, %s, %s, %s, %s, 1, %s)''', (telegram_id, new_key.key_id, plan_type, data_bytes, db_start_date, db_end_date, raw_username))
     conn.close()
     
     final_url = f"{new_key.access_url.split('#')[0]}#{urllib.parse.quote(suffix)}"
-    
     return final_url, suffix
 
 # --- Handlers ---
@@ -249,9 +254,8 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("👥 View Users Plans", callback_data='admin_view_users'), InlineKeyboardButton("⚠️ Expiring Soon", callback_data='admin_expiring')],
         [InlineKeyboardButton("➕ Manual Key ထုတ်ရန်", callback_data='admin_manual_key'), InlineKeyboardButton("📝 Plan အမည်များ ပြင်ရန်", callback_data='admin_edit_plans')],
         [InlineKeyboardButton("📊 စီးပွားရေးနှင့် Server အခြေအနေ", callback_data='admin_server_stats'), InlineKeyboardButton("💽 Server Storage ပြင်ရန်", callback_data='admin_change_storage')],
-        [InlineKeyboardButton("💾 Database Backup ယူရန်", callback_data='admin_manual_backup'), InlineKeyboardButton("☁️ AWS ချိတ်ဆက်ရန်", callback_data='admin_aws_setup')],
-        [InlineKeyboardButton("📢 Broadcast", callback_data='admin_broadcast'), InlineKeyboardButton("⚙️ Change API", callback_data='admin_change_api')],
-        [InlineKeyboardButton("🗑️ စနစ်တစ်ခုလုံး Reset ချရန်", callback_data='admin_reset_system')]
+        [InlineKeyboardButton("☁️ AWS ချိတ်ဆက်ရန်", callback_data='admin_aws_setup'), InlineKeyboardButton("📢 Broadcast", callback_data='admin_broadcast')],
+        [InlineKeyboardButton("⚙️ Change API", callback_data='admin_change_api'), InlineKeyboardButton("🗑️ စနစ်တစ်ခုလုံး Reset ချရန်", callback_data='admin_reset_system')]
     ]
     msg = "🛡️ **Admin Panel ရောက်ပါပြီ။**\n👇 လုပ်ဆောင်လိုသော မီနူးကို ရွေးချယ်ပါ။"
     if update.message: await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
@@ -303,42 +307,43 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif state == 'waiting_for_storage_gb' and update.effective_user.id in ADMIN_IDS:
         try:
             new_gb = int(text.strip())
-            conn = sqlite3.connect('happyhive.db', check_same_thread=False)
-            conn.cursor().execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('total_server_gb', ?)", (str(new_gb),))
-            conn.commit()
+            conn = get_db()
+            c = conn.cursor()
+            upsert_gb = "INSERT INTO settings (key, value) VALUES ('total_server_gb', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+            c.execute(upsert_gb, (str(new_gb),))
             conn.close()
             
             del context.user_data['state']
-            await update.message.reply_text(f"✅ Server ၏ Storage ကို **{new_gb} GB** အဖြစ် အောင်မြင်စွာ ပြောင်းလဲသတ်မှတ်လိုက်ပါပြီ။\n\n(ယခုမှစ၍ 📊 စီးပွားရေးနှင့် Server အခြေအနေ တွင် Storage Limit အသစ်ဖြင့် တွက်ချက်ပြသပါမည်)", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
+            await update.message.reply_text(f"✅ Server ၏ Storage ကို **{new_gb} GB** အဖြစ် အောင်မြင်စွာ ပြောင်းလဲသတ်မှတ်လိုက်ပါပြီ။", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
         except ValueError:
             await update.message.reply_text("❌ ကျေးဇူးပြု၍ Storage ပမာဏကို ဂဏန်းသက်သက်သာ ရိုက်ထည့်ပါ။ (ဥပမာ - 1000, 2000)", parse_mode='Markdown')
 
     elif state == 'waiting_for_aws_setup' and update.effective_user.id in ADMIN_IDS:
         parts = text.split('|')
         if len(parts) != 4:
-            return await update.message.reply_text("❌ Format မှားယွင်းနေပါသည်။ \n`AccessKey | SecretKey | ap-southeast-1 | InstanceName` ပုံစံဖြင့် မှန်ကန်စွာ ရိုက်ထည့်ပါ။", parse_mode='Markdown')
+            return await update.message.reply_text("❌ Format မှားယွင်းနေပါသည်။ \n`AccessKey | SecretKey | Region | InstanceName` ပုံစံဖြင့် မှန်ကန်စွာ ရိုက်ထည့်ပါ။", parse_mode='Markdown')
         
         ak, sk, reg, iname = map(str.strip, parts)
-        conn = sqlite3.connect('happyhive.db', check_same_thread=False)
+        conn = get_db()
         c = conn.cursor()
-        c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('aws_access_key', ?)", (ak,))
-        c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('aws_secret_key', ?)", (sk,))
-        c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('aws_region', ?)", (reg,))
-        c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('aws_instance_name', ?)", (iname,))
-        conn.commit()
+        aws_q = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        c.execute(aws_q, ('aws_access_key', ak))
+        c.execute(aws_q, ('aws_secret_key', sk))
+        c.execute(aws_q, ('aws_region', reg))
+        c.execute(aws_q, ('aws_instance_name', iname))
         conn.close()
         
         del context.user_data['state']
-        await update.message.reply_text("✅ AWS အချက်အလက်များ အောင်မြင်စွာ မှတ်သားပြီးပါပြီ။ 'စီးပွားရေးနှင့် Server အခြေအနေ' တွင် သွားရောက်စစ်ဆေးနိုင်ပါသည်။", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
+        await update.message.reply_text("✅ AWS အချက်အလက်များ အောင်မြင်စွာ မှတ်သားပြီးပါပြီ။", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
 
     elif state and state.startswith('waiting_for_plan_name_') and update.effective_user.id in ADMIN_IDS:
         plan_key = state.replace('waiting_for_plan_name_', '')
         if "|" not in text: return await update.message.reply_text("❌ Format မှားယွင်းနေပါသည်။ `Short Name | Display Name` ပုံစံဖြင့် ရိုက်ထည့်ပါ။", parse_mode='Markdown')
         short_name, display_name = map(str.strip, text.split('|', 1))
         
-        conn = sqlite3.connect('happyhive.db', check_same_thread=False)
-        conn.cursor().execute("UPDATE plan_configs SET short_name=?, display_name=? WHERE plan_key=?", (short_name, display_name, plan_key))
-        conn.commit()
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("UPDATE plan_configs SET short_name=%s, display_name=%s WHERE plan_key=%s", (short_name, display_name, plan_key))
         conn.close()
         
         del context.user_data['state']
@@ -346,8 +351,10 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif state == 'waiting_for_broadcast' and update.effective_user.id in ADMIN_IDS:
         await update.message.reply_text("⏳ Broadcast စတင်ပေးပို့နေပါသည်... ခဏစောင့်ပါ။")
-        conn = sqlite3.connect('happyhive.db', check_same_thread=False)
-        all_users = conn.cursor().execute("SELECT DISTINCT telegram_id FROM users").fetchall()
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("SELECT DISTINCT telegram_id FROM users")
+        all_users = c.fetchall()
         conn.close()
         
         success, failed = 0, 0
@@ -367,9 +374,10 @@ async def delete_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     try: target_id = int(context.args[0])
     except ValueError: return await update.message.reply_text("❌ User ID သည် ဂဏန်းသာ ဖြစ်ရပါမည်။")
 
-    conn = sqlite3.connect('happyhive.db', check_same_thread=False)
+    conn = get_db()
     c = conn.cursor()
-    user_plans = c.execute("SELECT key_id FROM plans WHERE telegram_id=?", (target_id,)).fetchall()
+    c.execute("SELECT key_id FROM plans WHERE telegram_id=%s", (target_id,))
+    user_plans = c.fetchall()
 
     if user_plans:
         try:
@@ -379,22 +387,23 @@ async def delete_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE
                 except: pass
         except: pass
 
-    c.execute("DELETE FROM plans WHERE telegram_id=?", (target_id,))
-    c.execute("DELETE FROM users WHERE telegram_id=?", (target_id,))
-    changes = conn.total_changes
-    conn.commit()
+    c.execute("DELETE FROM plans WHERE telegram_id=%s", (target_id,))
+    deleted_plans = c.rowcount
+    c.execute("DELETE FROM users WHERE telegram_id=%s", (target_id,))
+    deleted_users = c.rowcount
     conn.close()
 
-    if changes > 0: await update.message.reply_text(f"✅ User ID `{target_id}` အား ဖျက်ပစ်လိုက်ပါပြီ။", parse_mode='Markdown')
+    if deleted_plans > 0 or deleted_users > 0: await update.message.reply_text(f"✅ User ID `{target_id}` အား ဖျက်ပစ်လိုက်ပါပြီ။", parse_mode='Markdown')
     else: await update.message.reply_text(f"⚠️ User ID `{target_id}` ကို မတွေ့ပါ။", parse_mode='Markdown')
 
 async def set_api_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS: return
     if len(context.args) != 2: return await update.message.reply_text("❌ အသုံးပြုပုံ မှားယွင်းနေပါသည်။ ဥပမာ - `/setapi API_URL CERT_SHA256`", parse_mode='Markdown')
-    conn = sqlite3.connect('happyhive.db', check_same_thread=False)
-    conn.cursor().execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('outline_api_url', ?)", (context.args[0],))
-    conn.cursor().execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('outline_cert_sha256', ?)", (context.args[1],))
-    conn.commit()
+    conn = get_db()
+    c = conn.cursor()
+    upsert_q = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+    c.execute(upsert_q, ('outline_api_url', context.args[0]))
+    c.execute(upsert_q, ('outline_cert_sha256', context.args[1]))
     conn.close()
     await update.message.reply_text("✅ Outline API ပြောင်းလဲခြင်း အောင်မြင်ပါသည်။")
 
@@ -445,19 +454,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await query.edit_message_text(text=msg, reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
 
-    elif data == 'admin_manual_backup':
-        await query.edit_message_text("⏳ Database အား Backup ယူနေပါသည်... ခဏစောင့်ပါ။")
-        try:
-            if os.path.exists('happyhive.db'):
-                with open('happyhive.db', 'rb') as db_file:
-                    caption = f"📦 <b>Manual Database Backup</b>\n📅 <code>{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</code>\n\n✅ Admin မှ တောင်းဆိုထားသော Database ဖိုင် ဖြစ်ပါသည်။"
-                    await context.bot.send_document(chat_id=user_id, document=db_file, caption=caption, parse_mode='HTML')
-                await query.edit_message_text("✅ **Database Backup အား လူကြီးမင်းထံသို့ အောင်မြင်စွာ ပေးပို့လိုက်ပါပြီ။**", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
-            else:
-                await query.edit_message_text("❌ Database ဖိုင်ကို ရှာမတွေ့ပါ။", reply_markup=BACK_TO_ADMIN_MARKUP)
-        except Exception as e:
-            await query.edit_message_text(f"❌ Error ဖြစ်နေပါသည်: {e}", reply_markup=BACK_TO_ADMIN_MARKUP)
-
     elif data == 'share_referral':
         ref_link = f"https://t.me/{BOT_USERNAME}?start={user_id}"
         share_url = f"https://t.me/share/url?url={ref_link}&text=🌟 မြန်နှုန်းမြင့်ပြီး လုံခြုံစိတ်ချရတဲ့ HappyHive VPN ကို အသုံးပြုကြည့်ဖို့ ဖိတ်ခေါ်ပါတယ် ခင်ဗျာ။ အောက်ပါလင့်ခ်မှတဆင့် ဝင်ရောက်ပါ 👇"
@@ -471,9 +467,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == 'admin_change_storage':
         context.user_data['state'] = 'waiting_for_storage_gb'
-        
-        conn = sqlite3.connect('happyhive.db', check_same_thread=False)
-        row = conn.cursor().execute("SELECT value FROM settings WHERE key='total_server_gb'").fetchone()
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("SELECT value FROM settings WHERE key='total_server_gb'")
+        row = c.fetchone()
         conn.close()
         current_gb = row[0] if row else "2000"
         
@@ -488,19 +485,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == 'confirm_reset_all':
         await query.edit_message_text("⏳ စနစ်တစ်ခုလုံးကို ရှင်းလင်းနေပါသည်... ခဏစောင့်ပါ။")
         try:
-            conn = sqlite3.connect('happyhive.db', check_same_thread=False)
+            conn = get_db()
             c = conn.cursor()
-            all_keys = c.execute("SELECT key_id FROM plans").fetchall()
+            c.execute("SELECT key_id FROM plans")
+            all_keys = c.fetchall()
             if all_keys:
                 client = get_outline_client()
                 for kid in all_keys:
                     try: client.delete_key(kid[0])
                     except: pass
-            c.execute("DELETE FROM plans")
-            c.execute("DELETE FROM users")
-            try: c.execute("DELETE FROM sqlite_sequence WHERE name IN ('plans', 'users')")
-            except: pass
-            conn.commit()
+            c.execute("TRUNCATE TABLE plans, users RESTART IDENTITY")
             conn.close()
             await query.edit_message_text("✅ **စနစ်တစ်ခုလုံးကို အောင်မြင်စွာ Reset ချလိုက်ပါပြီ။**", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
         except Exception as e: await query.edit_message_text(f"❌ Error ဖြစ်နေပါသည်: {e}", reply_markup=BACK_TO_ADMIN_MARKUP)
@@ -514,18 +508,25 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == 'admin_server_stats':
         await query.edit_message_text(text="⏳ ငွေကြေးနှင့် Server Data များကို တွက်ချက်နေပါသည်...")
         try:
-            conn = sqlite3.connect('happyhive.db', check_same_thread=False)
+            conn = get_db()
             c = conn.cursor()
-            all_plans = c.execute("SELECT plan_type, start_date FROM plans WHERE start_date IS NOT NULL AND plan_type != 'FreeTrial'").fetchall()
-            active_plans = c.execute("SELECT data_limit FROM plans WHERE is_active=1 AND plan_type != 'FreeTrial'").fetchall()
+            c.execute("SELECT plan_type, start_date FROM plans WHERE start_date IS NOT NULL AND plan_type != 'FreeTrial'")
+            all_plans = c.fetchall()
+            c.execute("SELECT data_limit FROM plans WHERE is_active=1 AND plan_type != 'FreeTrial'")
+            active_plans = c.fetchall()
             
-            row_gb = c.execute("SELECT value FROM settings WHERE key='total_server_gb'").fetchone()
+            c.execute("SELECT value FROM settings WHERE key='total_server_gb'")
+            row_gb = c.fetchone()
             total_server_gb = int(row_gb[0]) if row_gb else 2000
             
-            aws_ak = c.execute("SELECT value FROM settings WHERE key='aws_access_key'").fetchone()
-            aws_sk = c.execute("SELECT value FROM settings WHERE key='aws_secret_key'").fetchone()
-            aws_reg = c.execute("SELECT value FROM settings WHERE key='aws_region'").fetchone()
-            aws_iname = c.execute("SELECT value FROM settings WHERE key='aws_instance_name'").fetchone()
+            c.execute("SELECT value FROM settings WHERE key='aws_access_key'")
+            aws_ak = c.fetchone()
+            c.execute("SELECT value FROM settings WHERE key='aws_secret_key'")
+            aws_sk = c.fetchone()
+            c.execute("SELECT value FROM settings WHERE key='aws_region'")
+            aws_reg = c.fetchone()
+            c.execute("SELECT value FROM settings WHERE key='aws_instance_name'")
+            aws_iname = c.fetchone()
             conn.close()
             
             PLAN_PRICES = {'30GB': 2000, '50GB': 3000, '100GB': 4000}
@@ -593,8 +594,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == 'admin_view_users':
         await query.edit_message_text("⏳ Data များကို ဆွဲယူနေပါသည်...")
-        conn = sqlite3.connect('happyhive.db', check_same_thread=False)
-        users_data = conn.cursor().execute("SELECT u.telegram_id, u.username, p.plan_type, p.end_date, p.key_id, p.data_limit FROM plans p JOIN users u ON p.telegram_id = u.telegram_id WHERE p.is_active=1").fetchall()
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("SELECT u.telegram_id, u.username, p.plan_type, p.end_date, p.key_id, p.data_limit FROM plans p JOIN users u ON p.telegram_id = u.telegram_id WHERE p.is_active=1")
+        users_data = c.fetchall()
         conn.close()
         if not users_data: return await query.edit_message_text("လက်ရှိ Active ဖြစ်နေသော User မရှိသေးပါ။", reply_markup=BACK_TO_ADMIN_MARKUP)
         try: all_keys = get_outline_client().get_keys()
@@ -616,9 +619,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text=msg, reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='HTML')
 
     elif data == 'admin_expiring':
-        conn = sqlite3.connect('happyhive.db', check_same_thread=False)
+        conn = get_db()
+        c = conn.cursor()
         warn_dt = (datetime.now() + timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
-        exp_data = conn.cursor().execute("SELECT u.telegram_id, u.username, p.plan_type, p.end_date FROM plans p JOIN users u ON p.telegram_id = u.telegram_id WHERE p.is_active=1 AND p.end_date IS NOT NULL AND p.end_date <= ?", (warn_dt,)).fetchall()
+        c.execute("SELECT u.telegram_id, u.username, p.plan_type, p.end_date FROM plans p JOIN users u ON p.telegram_id = u.telegram_id WHERE p.is_active=1 AND p.end_date IS NOT NULL AND p.end_date <= %s", (warn_dt,))
+        exp_data = c.fetchall()
         conn.close()
         if not exp_data: return await query.edit_message_text("✅ သုံးရက်အတွင်း သက်တမ်းကုန်မည့် User မရှိပါ။", reply_markup=BACK_TO_ADMIN_MARKUP)
         msg = "⚠️ <b>၃ ရက်အတွင်း သက်တမ်းကုန်မည့် Users များ</b>\n\n"
@@ -651,15 +656,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except: pass
 
     elif data == 'free_trial':
-        conn = sqlite3.connect('happyhive.db', check_same_thread=False)
-        is_used = conn.cursor().execute("SELECT is_trial_used FROM users WHERE telegram_id=?", (user_id,)).fetchone()[0]
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("SELECT is_trial_used FROM users WHERE telegram_id=%s", (user_id,))
+        is_used = c.fetchone()[0]
         if is_used == 1: await query.edit_message_text("⚠️ Free Trial ကို အသုံးပြုပြီးဖြစ်ပါသည်။ Plan ဝယ်ယူရန်အတွက် Menuသို့ပြန်သွားပါ", reply_markup=BACK_TO_MAIN_MARKUP)
         else:
             await query.edit_message_text("⏳ Free Trial Key ကို ဖန်တီးနေပါသည်...")
             try:
                 url, name = generate_vpn_key(user_id, "FreeTrial", data_gb=3)
-                conn.cursor().execute("UPDATE users SET is_trial_used=1 WHERE telegram_id=?", (user_id,))
-                conn.commit()
+                c.execute("UPDATE users SET is_trial_used=1 WHERE telegram_id=%s", (user_id,))
                 await safe_delete_message(query.message)
                 
                 await context.bot.send_message(user_id, f"✅ **Free Trial 3GB ရရှိပါပြီ။**\n⏱ **(၅) ရက်တိတိ အသုံးပြုနိုင်ပါသည်။**\n\n👤 **Name:** `{name}`\n\n👇 **အောက်ပါ Key ကို Copy ကူးပြီး Outline VPN တွင် ထည့်သွင်းအသုံးပြုနိုင်ပါပြီ။**", reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
@@ -680,8 +686,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     elif data == 'my_plan':
         await query.edit_message_text("⏳ အချက်အလက်များ ရှာဖွေနေပါသည်...")
-        conn = sqlite3.connect('happyhive.db', check_same_thread=False)
-        active_plans = conn.cursor().execute("SELECT key_id, plan_type, data_limit, start_date, end_date FROM plans WHERE telegram_id=? AND is_active=1", (user_id,)).fetchall()
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("SELECT key_id, plan_type, data_limit, start_date, end_date FROM plans WHERE telegram_id=%s AND is_active=1", (user_id,))
+        active_plans = c.fetchall()
         conn.close()
         if not active_plans: return await query.edit_message_text("❌ လက်ရှိ Plan မရှိသေးပါ။", reply_markup=BACK_TO_MAIN_MARKUP)
         try: all_keys = get_outline_client().get_keys()
@@ -781,9 +789,10 @@ async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_T
             )
         except Exception as e: logging.error(f"Failed to edit admin msg: {e}")
         
-    conn = sqlite3.connect('happyhive.db', check_same_thread=False)
+    conn = get_db()
     c = conn.cursor()
-    row = c.execute("SELECT has_rated FROM users WHERE telegram_id=?", (target_user_id,)).fetchone()
+    c.execute("SELECT has_rated FROM users WHERE telegram_id=%s", (target_user_id,))
+    row = c.fetchone()
     has_rated = row[0] if row else 0
     
     if action_code == "app":
@@ -793,7 +802,8 @@ async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_T
         try:
             client = get_outline_client()
             if req_action == 'extend':
-                active_plan = c.execute("SELECT key_id, data_limit, end_date, start_date, plan_type FROM plans WHERE telegram_id=? AND is_active=1 ORDER BY id DESC LIMIT 1", (target_user_id,)).fetchone()
+                c.execute("SELECT key_id, data_limit, end_date, start_date, plan_type FROM plans WHERE telegram_id=%s AND is_active=1 ORDER BY id DESC LIMIT 1", (target_user_id,))
+                active_plan = c.fetchone()
                 if active_plan:
                     old_key_id, old_limit, old_end_date, old_start_date, old_plan_type = active_plan
                     new_data_bytes = (plan_info['data_gb'] * 1e9) if plan_info['data_gb'] else 0
@@ -806,8 +816,7 @@ async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_T
                     new_end_str = new_end.strftime("%Y-%m-%d %H:%M:%S")
                     
                     if total_new_limit > 0: client.add_data_limit(old_key_id, int(total_new_limit))
-                    c.execute("UPDATE plans SET data_limit=?, end_date=? WHERE key_id=?", (int(total_new_limit), new_end_str, old_key_id))
-                    conn.commit()
+                    c.execute("UPDATE plans SET data_limit=%s, end_date=%s WHERE key_id=%s", (int(total_new_limit), new_end_str, old_key_id))
                     
                     start_str = old_start_date[:10] if old_start_date else datetime.now().strftime('%Y-%m-%d')
                     end_str = new_end.strftime('%Y-%m-%d')
@@ -836,21 +845,21 @@ async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_T
                     
                 if has_rated == 0:
                     if context.job_queue: context.job_queue.run_once(send_rating_request, 3600, data=target_user_id)
-                    c.execute("UPDATE users SET has_rated=1 WHERE telegram_id=?", (target_user_id,))
-                    conn.commit()
+                    c.execute("UPDATE users SET has_rated=1 WHERE telegram_id=%s", (target_user_id,))
                 await send_auto_backup(context, target_user_id, target_uname, "Plan အသစ် ချပေး")
 
-            ref_data = c.execute("SELECT referred_by, referral_reward_claimed FROM users WHERE telegram_id=?", (target_user_id,)).fetchone()
+            c.execute("SELECT referred_by, referral_reward_claimed FROM users WHERE telegram_id=%s", (target_user_id,))
+            ref_data = c.fetchone()
             if ref_data and ref_data[0] and ref_data[1] == 0:
                 referrer_id = ref_data[0]
-                ref_plan = c.execute("SELECT key_id, data_limit FROM plans WHERE telegram_id=? AND is_active=1 ORDER BY id DESC LIMIT 1", (referrer_id,)).fetchone()
+                c.execute("SELECT key_id, data_limit FROM plans WHERE telegram_id=%s AND is_active=1 ORDER BY id DESC LIMIT 1", (referrer_id,))
+                ref_plan = c.fetchone()
                 if ref_plan and ref_plan[1]:
                     new_limit = ref_plan[1] + int(1e9)
                     try:
                         client.add_data_limit(ref_plan[0], new_limit)
-                        c.execute("UPDATE plans SET data_limit=? WHERE key_id=?", (new_limit, ref_plan[0]))
-                        c.execute("UPDATE users SET referral_reward_claimed=1 WHERE telegram_id=?", (target_user_id,))
-                        conn.commit()
+                        c.execute("UPDATE plans SET data_limit=%s WHERE key_id=%s", (new_limit, ref_plan[0]))
+                        c.execute("UPDATE users SET referral_reward_claimed=1 WHERE telegram_id=%s", (target_user_id,))
                         await context.bot.send_message(referrer_id, "🎁 **Referral Bonus ရရှိပါသည်!**\n\nလူကြီးမင်း ဖိတ်ခေါ်ထားသော သူငယ်ချင်းမှ VPN ဝယ်ယူသွားသောကြောင့် လက်ရှိ Plan ထဲသို့ **Data 1GB** ကို လက်ဆောင်ထည့်သွင်းပေးလိုက်ပါပြီ။", parse_mode='Markdown')
                     except Exception as e: logging.error(f"Failed to give referral reward: {e}")
         except Exception as e: 
@@ -862,64 +871,53 @@ async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_T
     conn.close()
 
 async def check_expired_keys(context: ContextTypes.DEFAULT_TYPE):
-    conn = sqlite3.connect('happyhive.db', check_same_thread=False)
+    conn = get_db()
+    c = conn.cursor()
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    expired = conn.cursor().execute("SELECT p.key_id, p.telegram_id, p.plan_type, u.username FROM plans p JOIN users u ON p.telegram_id = u.telegram_id WHERE p.end_date IS NOT NULL AND p.end_date <= ? AND p.is_active = 1", (now_str,)).fetchall()
+    c.execute("SELECT p.key_id, p.telegram_id, p.plan_type, u.username FROM plans p JOIN users u ON p.telegram_id = u.telegram_id WHERE p.end_date IS NOT NULL AND p.end_date <= %s AND p.is_active = 1", (now_str,))
+    expired = c.fetchall()
     if expired:
         client = get_outline_client()
         for kid, tid, ptype, uname in expired:
             try:
                 client.delete_key(kid)
-                conn.cursor().execute("UPDATE plans SET is_active = 0 WHERE key_id = ?", (kid,))
+                c.execute("UPDATE plans SET is_active = 0 WHERE key_id = %s", (kid,))
                 msg = "⚠️ **Free Trial** ကုန်ဆုံးပါပြီ။" if ptype == "FreeTrial" else "⚠️ **VPN သက်တမ်း** ကုန်ဆုံးသွားပါပြီ။"
                 await context.bot.send_message(tid, msg, reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
-                
                 for admin in ADMIN_IDS:
                     try: await context.bot.send_message(admin, f"♻️ Auto-deleted <code>{kid}</code> for {get_mention(tid, uname)} (<code>{ptype}</code>).", parse_mode='HTML')
                     except: pass
             except: pass
-        conn.commit()
     conn.close()
 
 # --- Daily Admin Report Handler ---
 async def send_daily_report(context: ContextTypes.DEFAULT_TYPE):
     for admin in ADMIN_IDS:
         try:
-            await context.bot.send_message(
-                chat_id=admin, 
-                text="✅ **Daily Status Report**\n\nBot is running perfectly. Have a great day!", 
-                parse_mode='Markdown'
-            )
+            await context.bot.send_message(chat_id=admin, text="✅ **Daily Status Report**\n\nBot is running perfectly on PostgreSQL Cloud. Have a great day!", parse_mode='Markdown')
         except Exception as e:
             logging.error(f"Failed to send daily report to {admin}: {e}")
 
-# --- Global Error Handler ---
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logging.error(msg="Exception while handling an update:", exc_info=context.error)
     print(f"🚨 BOT ERROR: {context.error}")
 
 async def post_init(application: Application):
     await application.bot.set_my_commands([BotCommand("start", "Main Menu")], scope=BotCommandScopeDefault())
-    
     for admin in ADMIN_IDS:
-        try: 
-            await application.bot.set_my_commands([BotCommand("start", "Main Menu"), BotCommand("admin", "Admin Panel"), BotCommand("setapi", "API ပြောင်းရန်"), BotCommand("deluser", "User ဖျက်ရန်")], scope=BotCommandScopeChat(chat_id=admin))
+        try: await application.bot.set_my_commands([BotCommand("start", "Main Menu"), BotCommand("admin", "Admin Panel"), BotCommand("setapi", "API ပြောင်းရန်"), BotCommand("deluser", "User ဖျက်ရန်")], scope=BotCommandScopeChat(chat_id=admin))
         except: pass
 
 def main():
-    # 🌟 Web Server (Render အတွက်)
     keep_alive()
     print("✅ Web Server is running on port 10000...")
 
-    # 🌟 Telegram Bot Initialization
     app = Application.builder().token(BOT_TOKEN).job_queue(None).post_init(post_init).build()
     
     if app.job_queue:
         app.job_queue.run_repeating(check_expired_keys, interval=60, first=10)
-        
-        # 🌟 UTC +6:30 (Myanmar Time) ဖြင့် တိုက်ရိုက် သတ်မှတ်ခြင်း 🌟
         mmt_tz = timezone(timedelta(hours=6, minutes=30))
-        report_time = time(hour=8, minute=30, tzinfo=mmt_tz) # မြန်မာစံတော်ချိန် မနက် ၈ နာရီခွဲ
+        report_time = time(hour=8, minute=30, tzinfo=mmt_tz)
         app.job_queue.run_daily(send_daily_report, time=report_time)
     
     app.add_handler(CommandHandler("start", start))
@@ -927,16 +925,12 @@ def main():
     app.add_handler(CommandHandler("setapi", set_api_command))
     app.add_handler(CommandHandler("deluser", delete_user_command)) 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-    
     app.add_handler(CallbackQueryHandler(admin_approval_handler, pattern="^pay_(app|rej)_"))
-    
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    
-    # Error ဖမ်းပေးမည့် နေရာ
     app.add_error_handler(error_handler)
     
-    print("✅ Bot is running successfully...")
+    print("✅ Bot is running successfully on PostgreSQL...")
     app.run_polling()
 
 if __name__ == '__main__':
