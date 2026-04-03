@@ -14,6 +14,7 @@ from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, BotCommandScopeDefault, BotCommandScopeChat, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from outline_vpn.outline_vpn import OutlineVPN
+import requests
 
 # --- AWS Boto3 Library ---
 try:
@@ -50,7 +51,7 @@ def keep_alive():
 # --- Configuration ---
 BOT_TOKEN = "8633829411:AAEdkGteDuDt4fjJABAIR7jIMLVIPQ1PPhA"
 BOT_USERNAME = "HHVPN_bot" 
-ADMIN_IDS = [1656832105, 1640264253] 
+ADMIN_IDS = [1656832105] 
 FB_LINK = "https://facebook.com/HappyHiveVPN"
 ADMIN_CONTACT_LINK = "https://t.me/HappyHive9496"
 
@@ -213,7 +214,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     get_or_create_user(user.id, username, referred_by)
     
-    # 🌟 သက်တမ်းတိုးရန် ခလုတ်ကို ဖြုတ်ထားပါသည် 🌟
     keyboard = [
         [InlineKeyboardButton("🎁 Free 3GB အစမ်းသုံးရန်", callback_data='free_trial')],
         [InlineKeyboardButton("🛒 Plan ဝယ်ရန်", callback_data='buy_plan')],
@@ -706,7 +706,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e: await query.edit_message_text(f"❌ Error: {e}")
         conn.close()
 
-    # 🌟 ဝယ်ယူရန် တစ်ခုတည်းသာ ထားရှိခြင်း 🌟
     elif data == 'buy_plan':
         context.user_data['action_type'] = 'buy'
         msg = "🛒 **ဝယ်ယူလိုသော Plan ကို ရွေးချယ်ပါ:**\n\n✅ **100% Full Speed:** ဝယ်ယူထားသော Data မကုန်မချင်း အမြန်နှုန်း အပြည့်ဖြင့် အသုံးပြုနိုင်ပါသည်။"
@@ -828,7 +827,6 @@ async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_T
         if not plan_info: return conn.close()
             
         try:
-            # 🌟 သက်တမ်းတိုး (Extend) ကို ဖြုတ်လိုက်ပြီး "အသစ်ဝယ်ယူခြင်း" သီးသန့်ဖြစ်သွားပါပြီ 🌟
             access_url, key_name = generate_vpn_key(target_user_id, plan_info['plan_type'], plan_info['data_gb'], plan_info['months'])
             
             await context.bot.send_message(target_user_id, f"🎉 **ငွေသွင်းမှု အတည်ပြုပြီးပါပြီ။**\n\n👤 **Name:** `{key_name}`\n\n👇 **အောက်ပါ Key ကို Copy ကူးပြီး Outline VPN တွင် ထည့်သွင်းအသုံးပြုနိုင်ပါပြီ။**", reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
@@ -863,6 +861,59 @@ async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_T
     conn.commit()
     conn.close()
 
+# 🌟 FACEBOOK AUTO-APPROVE HANDLER (အသစ်ထည့်ထားသောအပိုင်း) 🌟
+async def fb_approval_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    if data.startswith("fbapp_"):
+        await query.edit_message_caption(caption=f"{query.message.caption}\n\n⏳ Processing Key for FB User...")
+
+        try:
+            # Underscore များကို သေချာစွာ နေရာချဖတ်ခြင်း (ဒီနေရာက အရင်က Error တက်တာပါ)
+            rest = data[6:]
+            parts = rest.rsplit("_", 1)
+            plan_code = parts[0]
+            fb_psid = parts[1]
+
+            # Database ထဲမှာ FB User အဖြစ် မှတ်မယ်
+            get_or_create_user(int(fb_psid), username=f"FB_{fb_psid}")
+
+            # Outline ဆီကနေ Key အသစ် သွားတောင်းမယ်
+            plan_info = get_plan_details().get(plan_code)
+            if not plan_info:
+                return await query.edit_message_caption(caption="❌ Error: Database ထဲတွင် Plan မရှိပါ။")
+
+            access_url, key_name = generate_vpn_key(int(fb_psid), plan_info['plan_type'], plan_info['data_gb'], plan_info['months'])
+
+            # Facebook API သုံးပြီး User Messenger ထဲကို Key သွားပို့မယ်
+            fb_token = os.environ.get("FB_PAGE_ACCESS_TOKEN")
+            if not fb_token:
+                return await query.edit_message_caption(caption=f"{query.message.caption_html}\n\n❌ **Error:** Telegram Bot ရဲ့ Render Environment ထဲမှာ `FB_PAGE_ACCESS_TOKEN` မထည့်ရသေးပါ။", parse_mode='HTML')
+
+            fb_msg = f"🎉 ငွေသွင်းမှု အတည်ပြုပြီးပါပြီ။\n\n👤 Name: {key_name}\n\n👇 အောက်ပါ Key ကို Copy ကူးပြီး Outline VPN တွင် ထည့်သွင်းအသုံးပြုနိုင်ပါပြီ။\n\n{access_url}"
+            url = f"https://graph.facebook.com/v18.0/me/messages?access_token={fb_token}"
+            res = requests.post(url, json={"recipient": {"id": fb_psid}, "message": {"text": fb_msg}})
+
+            if res.status_code == 200:
+                await query.edit_message_caption(caption=f"{query.message.caption_html}\n\n✅ **Approved & Key Sent to FB User!**\nKey: <code>{key_name}</code>", parse_mode='HTML')
+            else:
+                await query.edit_message_caption(caption=f"{query.message.caption_html}\n\n❌ **FB သို့ စာပို့မရပါ။ API Error:**\n<code>{res.text}</code>", parse_mode='HTML')
+
+        except Exception as e:
+            await query.edit_message_caption(caption=f"{query.message.caption_html}\n\n❌ **System Error ဖြစ်သွားပါသည်:**\n<code>{str(e)}</code>", parse_mode='HTML')
+
+    elif data.startswith("fbrej_"):
+        fb_psid = data[6:]
+        fb_token = os.environ.get("FB_PAGE_ACCESS_TOKEN")
+        if fb_token:
+            fb_msg = "❌ ငွေသွင်းမှု မအောင်မြင်ပါ။\n\nငွေသွင်းပြေစာ မှားယွင်းနေပါသည်။ ကျေးဇူးပြု၍ မှန်ကန်သော ပြေစာကို ပြန်လည်ပေးပို့ပေးပါ။"
+            url = f"https://graph.facebook.com/v18.0/me/messages?access_token={fb_token}"
+            requests.post(url, json={"recipient": {"id": fb_psid}, "message": {"text": fb_msg}})
+
+        await query.edit_message_caption(caption=f"{query.message.caption_html}\n\n❌ **Rejected**", parse_mode='HTML')
+
 async def check_expired_keys(context: ContextTypes.DEFAULT_TYPE):
     conn = get_db()
     c = conn.cursor()
@@ -884,7 +935,6 @@ async def check_expired_keys(context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
     conn.close()
 
-# --- Daily Admin Report Handler ---
 async def send_daily_report(context: ContextTypes.DEFAULT_TYPE):
     for admin in ADMIN_IDS:
         try:
@@ -919,8 +969,12 @@ def main():
     app.add_handler(CommandHandler("setapi", set_api_command))
     app.add_handler(CommandHandler("deluser", delete_user_command)) 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+    
+    # 🌟 ဒီမှာ Facebook ရဲ့ Approve ခလုတ်တွေကိုပါ ဖမ်းဖို့ ထည့်ထားပါတယ် 🌟
+    app.add_handler(CallbackQueryHandler(fb_approval_handler, pattern="^fb(app|rej)_"))
     app.add_handler(CallbackQueryHandler(admin_approval_handler, pattern="^pay_(app|rej)_"))
     app.add_handler(CallbackQueryHandler(button_handler))
+    
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_error_handler(error_handler)
     
