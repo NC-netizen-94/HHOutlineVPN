@@ -91,6 +91,9 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''')
     c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('outline_api_url', 'https://52.74.77.216:3584/j55zpDNtFPRSEVGYYK__XQ')")
     c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('outline_cert_sha256', '15AABC7E72C56F04C1DB2953ABD078D0ECAC4DF72F59C83D3090015882D0954A')")
+    
+    c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('total_server_gb', '2000')")
+    
     c.execute('''CREATE TABLE IF NOT EXISTS plan_configs (plan_key TEXT PRIMARY KEY, short_name TEXT, display_name TEXT, plan_type TEXT, data_gb INTEGER, months INTEGER)''')
     
     c.execute("DELETE FROM plan_configs")
@@ -150,7 +153,6 @@ def get_bottom_keyboard(user_id):
     btns = [["🏠 ပင်မ မီနူးသို့သွားပါ", "🛡️ Admin Panel"]] if user_id in ADMIN_IDS else [["🏠 ပင်မ မီနူးသို့သွားပါ"]]
     return ReplyKeyboardMarkup(btns, resize_keyboard=True, is_persistent=True)
 
-# 🌟 Key အသစ်ထုတ်ပေးတိုင်း Outline App တွင် နာမည်ပေါ်မည့် Format အသစ် 🌟
 def generate_vpn_key(telegram_id, plan_type, data_gb=None, months=None):
     client = get_outline_client()
     conn = sqlite3.connect('happyhive.db', check_same_thread=False)
@@ -165,13 +167,11 @@ def generate_vpn_key(telegram_id, plan_type, data_gb=None, months=None):
     end_date = start_date + timedelta(days=5) if plan_type == "FreeTrial" else (start_date + timedelta(days=30 * months) if months else None)
     db_end_date = end_date.strftime("%Y-%m-%d %H:%M:%S") if end_date else None
     
-    # 🌟 Format: PlanName_BuyDate_ExpDate_UserID_KeyID
     start_str = start_date.strftime('%Y-%m-%d')
     end_str = end_date.strftime('%Y-%m-%d') if end_date else "NoExp"
     
     suffix = f"{plan_type}_{start_str}_{end_str}_{telegram_id}_Key{new_key.key_id}"
     
-    # Outline Server ပေါ်တွင် နာမည်ပြောင်းပေးမည်
     client.rename_key(new_key.key_id, suffix)
     
     data_bytes = data_gb * 1e9 if data_gb else None
@@ -181,7 +181,6 @@ def generate_vpn_key(telegram_id, plan_type, data_gb=None, months=None):
     conn.commit()
     conn.close()
     
-    # URL တွင် # နောက်မှ စာသားကို သေချာဖတ်နိုင်ရန် URL Encode လုပ်ပေးမည်
     final_url = f"{new_key.access_url.split('#')[0]}#{urllib.parse.quote(suffix)}"
     
     return final_url, suffix
@@ -239,13 +238,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS: return
+    # 🌟 Backup ခလုတ်အသစ် ထည့်သွင်းခြင်း 🌟
     keyboard = [
         [InlineKeyboardButton("👥 View Users Plans", callback_data='admin_view_users'), InlineKeyboardButton("⚠️ Expiring Soon", callback_data='admin_expiring')],
         [InlineKeyboardButton("➕ Manual Key ထုတ်ရန်", callback_data='admin_manual_key'), InlineKeyboardButton("📝 Plan အမည်များ ပြင်ရန်", callback_data='admin_edit_plans')],
-        [InlineKeyboardButton("📊 စီးပွားရေးနှင့် Server အခြေအနေ", callback_data='admin_server_stats'), InlineKeyboardButton("🗑️ စနစ်တစ်ခုလုံး Reset ချရန်", callback_data='admin_reset_system')],
-        [InlineKeyboardButton("⚙️ Change API", callback_data='admin_change_api'), InlineKeyboardButton("📢 Broadcast", callback_data='admin_broadcast')]
+        [InlineKeyboardButton("📊 စီးပွားရေးနှင့် Server အခြေအနေ", callback_data='admin_server_stats'), InlineKeyboardButton("💽 Server Storage ပြင်ရန်", callback_data='admin_change_storage')],
+        [InlineKeyboardButton("💾 Database Backup ယူရန်", callback_data='admin_manual_backup'), InlineKeyboardButton("📢 Broadcast", callback_data='admin_broadcast')],
+        [InlineKeyboardButton("⚙️ Change API", callback_data='admin_change_api'), InlineKeyboardButton("🗑️ စနစ်တစ်ခုလုံး Reset ချရန်", callback_data='admin_reset_system')]
     ]
-    msg = "🛡️ **Admin Panel ရောက်ပါပြီ။**"
+    msg = "🛡️ **Admin Panel ရောက်ပါပြီ။**\n👇 လုပ်ဆောင်လိုသော မီနူးကို ရွေးချယ်ပါ။"
     if update.message: await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
     elif update.callback_query:
         await safe_delete_message(update.callback_query.message)
@@ -291,6 +292,19 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except: pass
             await send_auto_backup(context, target_id, uname, "Plan (Manual) ချပေး")
         except Exception as e: await update.message.reply_text(f"❌ Error: {e}")
+
+    elif state == 'waiting_for_storage_gb' and update.effective_user.id in ADMIN_IDS:
+        try:
+            new_gb = int(text.strip())
+            conn = sqlite3.connect('happyhive.db', check_same_thread=False)
+            conn.cursor().execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('total_server_gb', ?)", (str(new_gb),))
+            conn.commit()
+            conn.close()
+            
+            del context.user_data['state']
+            await update.message.reply_text(f"✅ Server ၏ Storage ကို **{new_gb} GB** အဖြစ် အောင်မြင်စွာ ပြောင်းလဲသတ်မှတ်လိုက်ပါပြီ။\n\n(ယခုမှစ၍ 📊 စီးပွားရေးနှင့် Server အခြေအနေ တွင် Storage Limit အသစ်ဖြင့် တွက်ချက်ပြသပါမည်)", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
+        except ValueError:
+            await update.message.reply_text("❌ ကျေးဇူးပြု၍ Storage ပမာဏကို ဂဏန်းသက်သက်သာ ရိုက်ထည့်ပါ။ (ဥပမာ - 1000, 2000)", parse_mode='Markdown')
 
     elif state and state.startswith('waiting_for_plan_name_') and update.effective_user.id in ADMIN_IDS:
         plan_key = state.replace('waiting_for_plan_name_', '')
@@ -396,6 +410,20 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_delete_message(query.message)
         return await start(update, context)
 
+    # 🌟 Manual Backup Function အသစ် 🌟
+    elif data == 'admin_manual_backup':
+        await query.edit_message_text("⏳ Database အား Backup ယူနေပါသည်... ခဏစောင့်ပါ။")
+        try:
+            if os.path.exists('happyhive.db'):
+                with open('happyhive.db', 'rb') as db_file:
+                    caption = f"📦 <b>Manual Database Backup</b>\n📅 <code>{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</code>\n\n✅ Admin မှ တောင်းဆိုထားသော Database ဖိုင် ဖြစ်ပါသည်။"
+                    await context.bot.send_document(chat_id=user_id, document=db_file, caption=caption, parse_mode='HTML')
+                await query.edit_message_text("✅ **Database Backup အား လူကြီးမင်းထံသို့ အောင်မြင်စွာ ပေးပို့လိုက်ပါပြီ။**", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
+            else:
+                await query.edit_message_text("❌ Database ဖိုင်ကို ရှာမတွေ့ပါ။", reply_markup=BACK_TO_ADMIN_MARKUP)
+        except Exception as e:
+            await query.edit_message_text(f"❌ Error ဖြစ်နေပါသည်: {e}", reply_markup=BACK_TO_ADMIN_MARKUP)
+
     elif data == 'share_referral':
         ref_link = f"https://t.me/{BOT_USERNAME}?start={user_id}"
         share_url = f"https://t.me/share/url?url={ref_link}&text=🌟 မြန်နှုန်းမြင့်ပြီး လုံခြုံစိတ်ချရတဲ့ HappyHive VPN ကို အသုံးပြုကြည့်ဖို့ ဖိတ်ခေါ်ပါတယ် ခင်ဗျာ။ အောက်ပါလင့်ခ်မှတဆင့် ဝင်ရောက်ပါ 👇"
@@ -406,6 +434,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         kb = [[InlineKeyboardButton("📤 ယခုပဲ မျှဝေရန်", url=share_url)], [InlineKeyboardButton("🔙 Menu သို့ပြန်သွားရန်", callback_data='back_to_main')]]
         await query.edit_message_text(text=msg, reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
+
+    elif data == 'admin_change_storage':
+        context.user_data['state'] = 'waiting_for_storage_gb'
+        
+        conn = sqlite3.connect('happyhive.db', check_same_thread=False)
+        row = conn.cursor().execute("SELECT value FROM settings WHERE key='total_server_gb'").fetchone()
+        conn.close()
+        current_gb = row[0] if row else "1000"
+        
+        msg = f"💽 **Server Storage ပြင်ရန်**\n\nလက်ရှိ Server ၏ စုစုပေါင်း Data ပမာဏမှာ **{current_gb} GB** ဖြစ်ပါသည်။\n\nပမာဏအသစ် ပြောင်းလဲသတ်မှတ်လိုပါက အောက်တွင် ဂဏန်းသက်သက်ဖြင့် ရိုက်ထည့်ပါ။\n\n*(ဥပမာ: 1TB ဆိုလျှင် `1000` ဟု ရိုက်ပါ၊ 2TB ဆိုလျှင် `2000` ဟု ရိုက်ပါ)*"
+        await query.edit_message_text(text=msg, reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
 
     elif data == 'admin_reset_system':
         msg = "⚠️ **သတိပေးချက် (System Reset)** ⚠️\n\nယခုလုပ်ဆောင်ချက်သည် စမ်းသပ်ထားသော User များ၊ Plan များ၊ ငွေကြေးမှတ်တမ်းများအားလုံးကို Database မှ အပြီးတိုင် ဖျက်ပစ်မည်ဖြစ်ပြီး၊ Outline Server ပေါ်ရှိ သက်ဆိုင်ရာ Key များကိုပါ ဖျက်ပစ်မည် ဖြစ်ပါသည်။\n\n**တကယ် Reset ချမှာ သေချာပြီလား?**"
@@ -444,7 +483,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             conn = sqlite3.connect('happyhive.db', check_same_thread=False)
             all_plans = conn.cursor().execute("SELECT plan_type, start_date FROM plans WHERE start_date IS NOT NULL AND plan_type != 'FreeTrial'").fetchall()
             active_plans = conn.cursor().execute("SELECT data_limit FROM plans WHERE is_active=1 AND plan_type != 'FreeTrial'").fetchall()
+            
+            row_gb = conn.cursor().execute("SELECT value FROM settings WHERE key='total_server_gb'").fetchone()
             conn.close()
+            
+            total_server_gb = int(row_gb[0]) if row_gb else 1000
             
             PLAN_PRICES = {'30GB': 2000, '50GB': 3000, '100GB': 4000}
             now = datetime.now()
@@ -461,13 +504,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             total_used_gb = sum((getattr(k, 'used_bytes', 0) or 0) for k in keys) / 1e9
             total_allocated_gb = sum(d[0]/1e9 for d in active_plans if d[0])
             
-            srv_status = "🔴 <b>DANGER:</b> Server အသစ် အမြန်ဝယ်ရန် လိုအပ်နေပါပြီ။" if total_used_gb >= 900 else ("🟡 <b>WARNING:</b> မကြာမီ Server အသစ်ဝယ်ရန် ပြင်ဆင်ထားပါ။" if total_allocated_gb >= 1500 and total_used_gb >= 700 else "🟢 <b>NORMAL:</b> Server အခြေအနေ ကောင်းမွန်ပါသေးသည်။")
+            danger_limit = total_server_gb * 0.9
+            warning_limit = total_server_gb * 0.7
+            
+            srv_status = f"🔴 <b>DANGER:</b> Server အသစ် အမြန်ဝယ်ရန် လိုအပ်နေပါပြီ။" if total_used_gb >= danger_limit else (f"🟡 <b>WARNING:</b> မကြာမီ Server အသစ်ဝယ်ရန် ပြင်ဆင်ထားပါ။" if total_used_gb >= warning_limit else "🟢 <b>NORMAL:</b> Server အခြေအနေ ကောင်းမွန်ပါသေးသည်။")
             
             msg = (
                 f"📊 <b>စီးပွားရေးနှင့် Server အခြေအနေ (Stats)</b>\n\n"
                 f"📅 <b>ယခုလစာရင်း ({now.strftime('%B')}):</b>\n▪️ လစဉ် အရင်း: <code>25,000 ကျပ်</code>\n▪️ ယခုလ ဝင်ငွေ: <code>{monthly_rev:,} ကျပ်</code>\n▪️ အခြေအနေ: {get_status(monthly_profit)} ကျပ်\n\n"
                 f"📆 <b>ယခုနှစ်စာရင်း (YTD):</b>\n▪️ နှစ်စဉ် အရင်း: <code>{25000 * current_m_num:,} ကျပ်</code>\n▪️ ယခုနှစ် ဝင်ငွေ: <code>{yearly_rev:,} ကျပ်</code>\n▪️ အခြေအနေ: {get_status(yearly_profit)} ကျပ်\n\n"
-                f"💽 <b>Server Data အခြေအနေ:</b>\n▪️ Active Keys: <code>{len(keys)} ခု</code>\n▪️ ရောင်းချထားသော Data: <code>{total_allocated_gb:.2f} GB</code>\n▪️ အမှန်တကယ် သုံးစွဲမှု: <code>{total_used_gb:.2f} GB</code> / 1000 GB\n\n💡 <b>အကြံပြုချက်:</b>\n{srv_status}"
+                f"💽 <b>Server Data အခြေအနေ:</b>\n▪️ Active Keys: <code>{len(keys)} ခု</code>\n▪️ ရောင်းချထားသော Data: <code>{total_allocated_gb:.2f} GB</code>\n▪️ အမှန်တကယ် သုံးစွဲမှု: <code>{total_used_gb:.2f} GB</code> / <b>{total_server_gb} GB</b>\n\n💡 <b>အကြံပြုချက်:</b>\n{srv_status}"
             )
             await query.edit_message_text(text=msg, reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='HTML')
         except Exception as e: await query.edit_message_text(text=f"❌ Error: {e}", reply_markup=BACK_TO_ADMIN_MARKUP)
@@ -701,7 +747,6 @@ async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_T
                     c.execute("UPDATE plans SET data_limit=?, end_date=? WHERE key_id=?", (int(total_new_limit), new_end_str, old_key_id))
                     conn.commit()
                     
-                    # 🌟 Extend လုပ်သည့်အခါလည်း Format အသစ်ဖြင့် နာမည်ပြန်ချိန်းပေးမည် 🌟
                     start_str = old_start_date[:10] if old_start_date else datetime.now().strftime('%Y-%m-%d')
                     end_str = new_end.strftime('%Y-%m-%d')
                     new_suffix = f"{old_plan_type}_{start_str}_{end_str}_{target_user_id}_Key{old_key_id}"
