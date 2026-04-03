@@ -906,7 +906,7 @@ def main():
     keep_alive()
     print("✅ Web Server is running on port 10000...")
 
-    app = Application.builder().token(BOT_TOKEN).job_queue(None).post_init(post_init).build()
+    app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
     
     if app.job_queue:
         app.job_queue.run_repeating(check_expired_keys, interval=60, first=10)
