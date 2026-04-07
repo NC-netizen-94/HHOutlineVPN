@@ -90,6 +90,17 @@ def init_db():
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS users (telegram_id BIGINT PRIMARY KEY, unique_id TEXT, is_trial_used INT, username TEXT, referred_by BIGINT, referral_reward_claimed INT DEFAULT 0, has_rated INT DEFAULT 0)''')
     c.execute('''CREATE TABLE IF NOT EXISTS plans (id SERIAL PRIMARY KEY, telegram_id BIGINT, key_id TEXT, plan_type TEXT, data_limit BIGINT, start_date TEXT, end_date TEXT, is_active INT, username TEXT)''')
+    
+    # --- NEW: Safely add accumulation columns for Data Usage ---
+    try:
+        c.execute("ALTER TABLE plans ADD COLUMN accumulated_bytes BIGINT DEFAULT 0")
+    except psycopg2.Error:
+        pass # Column already exists
+    try:
+        c.execute("ALTER TABLE plans ADD COLUMN last_known_bytes BIGINT DEFAULT 0")
+    except psycopg2.Error:
+        pass # Column already exists
+
     c.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''')
     upsert_query = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
     c.execute(upsert_query, ('outline_api_url', 'https://52.74.77.216:3584/j55zpDNtFPRSEVGYYK__XQ'))
@@ -108,6 +119,42 @@ def init_db():
     conn.close()
 
 init_db()
+
+# --- NEW: Function to Calculate and Sync Accumulated Data Usage ---
+def calculate_and_sync_usage(all_keys):
+    """Syncs Outline usage with DB to prevent data reset on server migration."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT key_id, accumulated_bytes, last_known_bytes FROM plans")
+    db_plans = {str(r[0]): {'acc': r[1] or 0, 'last': r[2] or 0} for r in c.fetchall()}
+
+    usage_dict = {}
+    for k in all_keys:
+        kid = str(k.key_id)
+        curr_b = int(getattr(k, 'used_bytes', 0) or 0)
+
+        if kid in db_plans:
+            acc = int(db_plans[kid]['acc'])
+            last = int(db_plans[kid]['last'])
+
+            if curr_b < last:
+                # Server Reset or Swap Detected! (New bytes are less than last known bytes)
+                acc += last
+                last = curr_b
+                c.execute("UPDATE plans SET accumulated_bytes=%s, last_known_bytes=%s WHERE key_id=%s", (acc, last, kid))
+            elif curr_b > last:
+                # Normal Operation (Just update last known bytes)
+                last = curr_b
+                c.execute("UPDATE plans SET last_known_bytes=%s WHERE key_id=%s", (last, kid))
+
+            usage_dict[kid] = acc + curr_b
+        else:
+            usage_dict[kid] = curr_b
+
+    conn.commit()
+    conn.close()
+    return usage_dict
+# -----------------------------------------------------------------
 
 def get_plan_details():
     conn = get_db()
@@ -495,7 +542,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             def get_status(p): return f"🟢 မြတ် (<b>+{p:,}</b>)" if p > 0 else (f"⚪️ အရင်းကြေ (<b>0</b>)" if p == 0 else f"🔴 ရှုံး (<b>{p:,}</b>)")
             client = get_outline_client()
             keys = client.get_keys()
-            total_used_gb = sum((getattr(k, 'used_bytes', 0) or 0) for k in keys) / 1e9
+            
+            # --- NEW: Using synced data dictionary ---
+            usage_dict = calculate_and_sync_usage(keys)
+            total_used_gb = sum(usage_dict.values()) / 1e9
+            
             total_allocated_gb = sum(d[0]/1e9 for d in active_plans if d[0])
             danger_limit = total_server_gb * 0.9
             warning_limit = total_server_gb * 0.7
@@ -539,14 +590,20 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         users_data = c.fetchall()
         conn.close()
         if not users_data: return await query.edit_message_text("လက်ရှိ Active ဖြစ်နေသော User မရှိသေးပါ။", reply_markup=BACK_TO_ADMIN_MARKUP)
-        try: all_keys = get_outline_client().get_keys()
+        try: 
+            all_keys = get_outline_client().get_keys()
+            # --- NEW: Using synced data dictionary ---
+            usage_dict = calculate_and_sync_usage(all_keys)
         except Exception as e: return await query.edit_message_text(f"❌ Server Error: {e}", reply_markup=BACK_TO_ADMIN_MARKUP)
             
         msg = "👥 <b>Active Users List</b>\n\n"
         for tid, uname, ptype, edate, kid, dlimit in users_data:
             matched_key = next((k for k in all_keys if str(k.key_id) == str(kid)), None)
             final_url = f"{matched_key.access_url.split('#')[0]}#{matched_key.name or f'Key_{kid}'}" if matched_key else "Not Found"
-            used_gb = ((getattr(matched_key, 'used_bytes', 0) or 0) / 1e9) if matched_key else 0
+            
+            # --- NEW: Get accumulated used_gb ---
+            used_gb = usage_dict.get(str(kid), 0) / 1e9
+            
             if dlimit:
                 limit_gb = dlimit / 1e9
                 rem_gb = max(0, limit_gb - used_gb)
@@ -627,12 +684,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         active_plans = c.fetchall()
         conn.close()
         if not active_plans: return await query.edit_message_text("❌ လက်ရှိ Plan မရှိသေးပါ။", reply_markup=BACK_TO_MAIN_MARKUP)
-        try: all_keys = get_outline_client().get_keys()
+        try: 
+            all_keys = get_outline_client().get_keys()
+            # --- NEW: Using synced data dictionary ---
+            usage_dict = calculate_and_sync_usage(all_keys)
         except: return await query.edit_message_text("❌ Server Error", reply_markup=BACK_TO_MAIN_MARKUP)
 
         msg = "👤 **လက်ရှိ Plan အချက်အလက်များ**\n\n"
         for db_kid, ptype, dlimit, sdate, edate in active_plans:
-            used_gb = next((((getattr(k, 'used_bytes', 0) or 0) / 1e9) for k in all_keys if str(k.key_id) == str(db_kid)), 0)
+            
+            # --- NEW: Get accumulated used_gb ---
+            used_gb = usage_dict.get(str(db_kid), 0) / 1e9
+            
             disp_plan = next((details['display'] for key, details in plans_dict.items() if details['plan_type'] == ptype), ptype)
             msg += f"🔹 **Plan:** `{disp_plan}`\n📅 **စဝယ်သည့်ရက်:** `{sdate[:10]}`\n"
             msg += f"⏳ **ကုန်ဆုံးရက်:** `{edate[:10]}`\n" if edate else ""
