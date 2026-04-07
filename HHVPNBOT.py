@@ -91,15 +91,12 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS users (telegram_id BIGINT PRIMARY KEY, unique_id TEXT, is_trial_used INT, username TEXT, referred_by BIGINT, referral_reward_claimed INT DEFAULT 0, has_rated INT DEFAULT 0)''')
     c.execute('''CREATE TABLE IF NOT EXISTS plans (id SERIAL PRIMARY KEY, telegram_id BIGINT, key_id TEXT, plan_type TEXT, data_limit BIGINT, start_date TEXT, end_date TEXT, is_active INT, username TEXT)''')
     
-    # --- NEW: Safely add accumulation columns for Data Usage ---
     try:
         c.execute("ALTER TABLE plans ADD COLUMN accumulated_bytes BIGINT DEFAULT 0")
-    except psycopg2.Error:
-        pass # Column already exists
+    except psycopg2.Error: pass
     try:
         c.execute("ALTER TABLE plans ADD COLUMN last_known_bytes BIGINT DEFAULT 0")
-    except psycopg2.Error:
-        pass # Column already exists
+    except psycopg2.Error: pass
 
     c.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''')
     upsert_query = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
@@ -120,12 +117,11 @@ def init_db():
 
 init_db()
 
-# --- NEW: Function to Calculate and Sync Accumulated Data Usage ---
+# 🌟 Outline Server မှ Data များကို Database သို့ (၁ မိနစ် တစ်ခါ) ဆွဲသွင်းမည့် စနစ်
 def calculate_and_sync_usage(all_keys):
-    """Syncs Outline usage with DB to prevent data reset on server migration."""
     conn = get_db()
     c = conn.cursor()
-    c.execute("SELECT key_id, accumulated_bytes, last_known_bytes FROM plans")
+    c.execute("SELECT key_id, accumulated_bytes, last_known_bytes FROM plans WHERE is_active = 1")
     db_plans = {str(r[0]): {'acc': r[1] or 0, 'last': r[2] or 0} for r in c.fetchall()}
 
     usage_dict = {}
@@ -138,12 +134,11 @@ def calculate_and_sync_usage(all_keys):
             last = int(db_plans[kid]['last'])
 
             if curr_b < last:
-                # Server Reset or Swap Detected! (New bytes are less than last known bytes)
+                # Server အသစ်ပြောင်းခြင်း (သို့) Outline 0 ပြန်ဖြစ်သွားခြင်းကို ထောက်လှမ်းမိပါက
                 acc += last
                 last = curr_b
                 c.execute("UPDATE plans SET accumulated_bytes=%s, last_known_bytes=%s WHERE key_id=%s", (acc, last, kid))
             elif curr_b > last:
-                # Normal Operation (Just update last known bytes)
                 last = curr_b
                 c.execute("UPDATE plans SET last_known_bytes=%s WHERE key_id=%s", (last, kid))
 
@@ -154,7 +149,6 @@ def calculate_and_sync_usage(all_keys):
     conn.commit()
     conn.close()
     return usage_dict
-# -----------------------------------------------------------------
 
 def get_plan_details():
     conn = get_db()
@@ -217,7 +211,8 @@ def generate_vpn_key(telegram_id, plan_type, data_gb=None, months=None):
     
     client.rename_key(new_key.key_id, suffix)
     data_bytes = data_gb * 1e9 if data_gb else None
-    if data_bytes: client.add_data_limit(new_key.key_id, int(data_bytes))
+    
+    # 🌟 Outline Server ပေါ်တွင် Data Limit မထားတော့ပါ။ Database ကနေပဲ ထိန်းပါမည်။
     
     c.execute('''INSERT INTO plans (telegram_id, key_id, plan_type, data_limit, start_date, end_date, is_active, username) VALUES (%s, %s, %s, %s, %s, %s, 1, %s)''', (telegram_id, new_key.key_id, plan_type, data_bytes, db_start_date, db_end_date, raw_username))
     conn.close()
@@ -532,7 +527,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             aws_reg = c.fetchone()
             c.execute("SELECT value FROM settings WHERE key='aws_instance_name'")
             aws_iname = c.fetchone()
+            
+            # 🌟 Admin Server Stats ကိုလည်း Database ကနေပဲ တွက်ပါမယ်
+            c.execute("SELECT accumulated_bytes, last_known_bytes FROM plans WHERE is_active=1")
+            all_active_usage = c.fetchall()
             conn.close()
+            
+            total_used_gb = sum((r[0] or 0) + (r[1] or 0) for r in all_active_usage) / 1e9
+
             PLAN_PRICES = {'30GB': 2000, '50GB': 3000, '100GB': 4000}
             now = datetime.now(timezone.utc)
             current_m, current_y, current_m_num = now.strftime("%Y-%m"), now.strftime("%Y"), now.month
@@ -540,12 +542,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             yearly_rev = sum(PLAN_PRICES.get(p[0], 0) for p in all_plans if p[1][:4] == current_y)
             monthly_profit, yearly_profit = monthly_rev - 25000, yearly_rev - (25000 * current_m_num)
             def get_status(p): return f"🟢 မြတ် (<b>+{p:,}</b>)" if p > 0 else (f"⚪️ အရင်းကြေ (<b>0</b>)" if p == 0 else f"🔴 ရှုံး (<b>{p:,}</b>)")
-            client = get_outline_client()
-            keys = client.get_keys()
             
-            # --- NEW: Using synced data dictionary ---
-            usage_dict = calculate_and_sync_usage(keys)
-            total_used_gb = sum(usage_dict.values()) / 1e9
+            try:
+                client = get_outline_client()
+                active_keys_count = len(client.get_keys())
+            except:
+                active_keys_count = "Error"
             
             total_allocated_gb = sum(d[0]/1e9 for d in active_plans if d[0])
             danger_limit = total_server_gb * 0.9
@@ -566,7 +568,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"📊 <b>စီးပွားရေးနှင့် Server အခြေအနေ (Stats)</b>\n\n"
                 f"📅 <b>ယခုလစာရင်း ({now.strftime('%B')}):</b>\n▪️ လစဉ် အရင်း: <code>25,000 ကျပ်</code>\n▪️ ယခုလ ဝင်ငွေ: <code>{monthly_rev:,} ကျပ်</code>\n▪️ အခြေအနေ: {get_status(monthly_profit)} ကျပ်\n\n"
                 f"📆 <b>ယခုနှစ်စာရင်း (YTD):</b>\n▪️ နှစ်စဉ် အရင်း: <code>{25000 * current_m_num:,} ကျပ်</code>\n▪️ ယခုနှစ် ဝင်ငွေ: <code>{yearly_rev:,} ကျပ်</code>\n▪️ အခြေအနေ: {get_status(yearly_profit)} ကျပ်\n\n"
-                f"💽 <b>Server Data အခြေအနေ:</b>\n▪️ Active Keys: <code>{len(keys)} ခု</code>\n▪️ ရောင်းချထားသော Data: <code>{total_allocated_gb:.2f} GB</code>\n▪️ Outline တွက်ချက်မှု: <code>{total_used_gb:.2f} GB</code> / <b>{total_server_gb} GB</b>\n{aws_status_text}\n\n💡 <b>အကြံပြုချက်:</b>\n{srv_status}"
+                f"💽 <b>Server Data အခြေအနေ:</b>\n▪️ Active Keys: <code>{active_keys_count} ခု</code>\n▪️ ရောင်းချထားသော Data: <code>{total_allocated_gb:.2f} GB</code>\n▪️ တွက်ချက်ထားသော Data: <code>{total_used_gb:.2f} GB</code> / <b>{total_server_gb} GB</b>\n{aws_status_text}\n\n💡 <b>အကြံပြုချက်:</b>\n{srv_status}"
             )
             await query.edit_message_text(text=msg, reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='HTML')
         except Exception as e: await query.edit_message_text(text=f"❌ Error: {e}", reply_markup=BACK_TO_ADMIN_MARKUP)
@@ -586,23 +588,23 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("⏳ Data များကို ဆွဲယူနေပါသည်...")
         conn = get_db()
         c = conn.cursor()
-        c.execute("SELECT u.telegram_id, u.username, p.plan_type, p.end_date, p.key_id, p.data_limit FROM plans p JOIN users u ON p.telegram_id = u.telegram_id WHERE p.is_active=1")
+        # 🌟 Admin လာကြည့်ရင်လည်း Database ထဲက အချက်အလက်ကိုပဲ တိုက်ရိုက်ဆွဲထုတ်ပါမည်
+        c.execute("SELECT u.telegram_id, u.username, p.plan_type, p.end_date, p.key_id, p.data_limit, p.accumulated_bytes, p.last_known_bytes FROM plans p JOIN users u ON p.telegram_id = u.telegram_id WHERE p.is_active=1")
         users_data = c.fetchall()
         conn.close()
+        
         if not users_data: return await query.edit_message_text("လက်ရှိ Active ဖြစ်နေသော User မရှိသေးပါ။", reply_markup=BACK_TO_ADMIN_MARKUP)
         try: 
             all_keys = get_outline_client().get_keys()
-            # --- NEW: Using synced data dictionary ---
-            usage_dict = calculate_and_sync_usage(all_keys)
         except Exception as e: return await query.edit_message_text(f"❌ Server Error: {e}", reply_markup=BACK_TO_ADMIN_MARKUP)
             
         msg = "👥 <b>Active Users List</b>\n\n"
-        for tid, uname, ptype, edate, kid, dlimit in users_data:
+        for tid, uname, ptype, edate, kid, dlimit, acc_bytes, last_bytes in users_data:
             matched_key = next((k for k in all_keys if str(k.key_id) == str(kid)), None)
             final_url = f"{matched_key.access_url.split('#')[0]}#{matched_key.name or f'Key_{kid}'}" if matched_key else "Not Found"
             
-            # --- NEW: Get accumulated used_gb ---
-            used_gb = usage_dict.get(str(kid), 0) / 1e9
+            # Database မှ သုံးထားသော Data ကိုသာ ယူပါမည်
+            used_gb = ((acc_bytes or 0) + (last_bytes or 0)) / 1e9
             
             if dlimit:
                 limit_gb = dlimit / 1e9
@@ -665,7 +667,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_message(user_id, f"✅ **Free Trial 3GB ရရှိပါပြီ。**\n⏱ **(၅) ရက်တိတိ အသုံးပြုနိုင်ပါသည်။**\n\n👤 **Name:** `{name}`\n\n👇 **အောက်ပါ Key ကို Copy ကူးပြီး Outline VPN တွင် ထည့်သွင်းအသုံးပြုနိုင်ပါပြီ。**", parse_mode='Markdown')
                 await context.bot.send_message(user_id, f"`{url}`", parse_mode='Markdown')
                 
-                # 🌟 Telegram တွင် Promotion စာသား ပို့ခြင်း 🌟
                 promo_msg = "🎁 သတင်းကောင်း!\nTelegram ကနေ သူငယ်ချင်းကို Invite လုပ်ရင် 1GB Free ရမယ်နော်။\n\n👉 အသေးစိတ်ကို Admin ( https://t.me/HappyHive9496 ) ထံ ဆက်သွယ်မေးမြန်းနိုင်ပါတယ်။"
                 await context.bot.send_message(user_id, promo_msg, reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
             except Exception as e: await query.edit_message_text(f"❌ Error: {e}")
@@ -677,24 +678,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text=msg, reply_markup=get_plans_keyboard(plans_dict), parse_mode='Markdown')
         
     elif data == 'my_plan':
+        # 🌟 မိမိ Data စစ်ရန် နှိပ်လျှင် Outline Server ဆီမသွားဘဲ Database ထဲကသာ အမြန်ဆွဲထုတ်ပြပါမည် 🌟
         await query.edit_message_text("⏳ အချက်အလက်များ ရှာဖွေနေပါသည်...")
         conn = get_db()
         c = conn.cursor()
-        c.execute("SELECT key_id, plan_type, data_limit, start_date, end_date FROM plans WHERE telegram_id=%s AND is_active=1", (user_id,))
+        c.execute("SELECT plan_type, data_limit, start_date, end_date, accumulated_bytes, last_known_bytes FROM plans WHERE telegram_id=%s AND is_active=1", (user_id,))
         active_plans = c.fetchall()
         conn.close()
+        
         if not active_plans: return await query.edit_message_text("❌ လက်ရှိ Plan မရှိသေးပါ။", reply_markup=BACK_TO_MAIN_MARKUP)
-        try: 
-            all_keys = get_outline_client().get_keys()
-            # --- NEW: Using synced data dictionary ---
-            usage_dict = calculate_and_sync_usage(all_keys)
-        except: return await query.edit_message_text("❌ Server Error", reply_markup=BACK_TO_MAIN_MARKUP)
 
         msg = "👤 **လက်ရှိ Plan အချက်အလက်များ**\n\n"
-        for db_kid, ptype, dlimit, sdate, edate in active_plans:
+        for ptype, dlimit, sdate, edate, acc_bytes, last_bytes in active_plans:
             
-            # --- NEW: Get accumulated used_gb ---
-            used_gb = usage_dict.get(str(db_kid), 0) / 1e9
+            # Database မှ သုံးထားသော Data ကိုသာ ယူပါမည် (Outline ကို ခေါ်စရာမလိုတော့ပါ)
+            used_gb = ((acc_bytes or 0) + (last_bytes or 0)) / 1e9
             
             disp_plan = next((details['display'] for key, details in plans_dict.items() if details['plan_type'] == ptype), ptype)
             msg += f"🔹 **Plan:** `{disp_plan}`\n📅 **စဝယ်သည့်ရက်:** `{sdate[:10]}`\n"
@@ -774,7 +772,6 @@ async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_T
             await context.bot.send_message(target_user_id, f"🎉 **ငွေသွင်းမှု အတည်ပြုပြီးပါပြီ。**\n\n👤 **Name:** `{key_name}`\n\n👇 **အောက်ပါ Key ကို Copy ကူးပြီး Outline VPN တွင် ထည့်သွင်းအသုံးပြုနိုင်ပါပြီ。**", parse_mode='Markdown')
             await context.bot.send_message(target_user_id, f"`{access_url}`", parse_mode='Markdown')
                 
-            # 🌟 Telegram တွင် Promotion စာသား ပို့ခြင်း 🌟
             promo_msg = "🎁 သတင်းကောင်း!\nTelegram ကနေ သူငယ်ချင်းကို Invite လုပ်ရင် 1GB Free ရမယ်နော်။\n\n👉 အသေးစိတ်ကို Admin ( https://t.me/HappyHive9496 ) ထံ ဆက်သွယ်မေးမြန်းနိုင်ပါတယ်။"
             await context.bot.send_message(target_user_id, promo_msg, reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
             
@@ -791,7 +788,6 @@ async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_T
     conn.commit()
     conn.close()
 
-# 🌟 FACEBOOK AUTO-APPROVE HANDLER 🌟
 async def fb_approval_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -818,9 +814,8 @@ async def fb_approval_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             url = f"https://graph.facebook.com/v18.0/me/messages?access_token={fb_token}"
             
             requests.post(url, json={"recipient": {"id": fb_psid}, "message": {"text": fb_msg1}})
-            res = requests.post(url, json={"recipient": {"id": fb_psid}, "message": {"text": access_url}}) # Send Link separately
+            res = requests.post(url, json={"recipient": {"id": fb_psid}, "message": {"text": access_url}}) 
 
-            # 🌟 Referral Promotion စာသား ထပ်တိုးခြင်း 🌟
             promo_msg = "🎁 သတင်းကောင်း!\nTelegram ကနေ သူငယ်ချင်းကို Invite လုပ်ရင် 1GB Free ရမယ်နော်။\n\n👉 အသေးစိတ်ကို Admin ( https://t.me/HappyHive9496 ) ထံ ဆက်သွယ်မေးမြန်းနိုင်ပါတယ်။"
             requests.post(url, json={"recipient": {"id": fb_psid}, "message": {"text": promo_msg}})
 
@@ -839,21 +834,50 @@ async def fb_approval_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             requests.post(url, json={"recipient": {"id": fb_psid}, "message": {"text": fb_msg}})
         await query.edit_message_caption(caption=f"{query.message.caption_html}\n\n❌ **Rejected**", parse_mode='HTML')
 
+# 🌟 Outline Server နှင့် Database ကို Sync လုပ်ပြီး သက်တမ်း/Data ပြည့်ပါက Key များကို ဖျက်မည့် စနစ် (Database-based Expiry System) 🌟
 async def check_expired_keys(context: ContextTypes.DEFAULT_TYPE):
     conn = get_db()
     c = conn.cursor()
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    c.execute("SELECT p.key_id, p.telegram_id, p.plan_type, u.username FROM plans p JOIN users u ON p.telegram_id = u.telegram_id WHERE p.end_date IS NOT NULL AND p.end_date <= %s AND p.is_active = 1", (now_str,))
-    expired = c.fetchall()
-    if expired:
-        client = get_outline_client()
-        for kid, tid, ptype, uname in expired:
-            try:
-                client.delete_key(kid)
-                c.execute("UPDATE plans SET is_active = 0 WHERE key_id = %s", (kid,))
-                msg = "⚠️ **Free Trial** ကုန်ဆုံးပါပြီ。" if ptype == "FreeTrial" else "⚠️ **VPN သက်တမ်း** ကုန်ဆုံးသွားပါပြီ。"
-                await context.bot.send_message(tid, msg, reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
-            except: pass
+    
+    c.execute("SELECT p.key_id, p.telegram_id, p.plan_type, u.username, p.end_date, p.data_limit FROM plans p JOIN users u ON p.telegram_id = u.telegram_id WHERE p.is_active = 1")
+    active_plans = c.fetchall()
+    
+    if active_plans:
+        try:
+            client = get_outline_client()
+            all_keys = client.get_keys()
+            usage_dict = calculate_and_sync_usage(all_keys)
+        except Exception as e:
+            conn.close()
+            return
+
+        for kid, tid, ptype, uname, end_date, dlimit in active_plans:
+            is_expired_time = False
+            is_expired_data = False
+            
+            # (၁) ရက်သက်တမ်း ကုန်တာကို စစ်မည်
+            if end_date and end_date <= now_str:
+                is_expired_time = True
+                
+            # (၂) Database ရှိ Data အကျန် ပြည့်တာကို စစ်မည်
+            if dlimit:
+                total_used = usage_dict.get(str(kid), 0)
+                if total_used >= dlimit:
+                    is_expired_data = True
+                    
+            if is_expired_time or is_expired_data:
+                try:
+                    client.delete_key(kid)
+                    c.execute("UPDATE plans SET is_active = 0 WHERE key_id = %s", (kid,))
+                    
+                    if is_expired_data:
+                        msg = f"⚠️ **အသိပေးချက်:** လူကြီးမင်း၏ Plan (Data {dlimit/1e9:.0f}GB) သည် သတ်မှတ်ပမာဏ ပြည့်သွားပါပြီ။"
+                    else:
+                        msg = "⚠️ **Free Trial** ကုန်ဆုံးပါပြီ。" if ptype == "FreeTrial" else "⚠️ **VPN သက်တမ်း** ကုန်ဆုံးသွားပါပြီ。"
+                        
+                    await context.bot.send_message(tid, msg, reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
+                except: pass
         conn.commit()
     conn.close()
 
