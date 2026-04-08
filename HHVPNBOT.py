@@ -117,7 +117,7 @@ def init_db():
 
 init_db()
 
-# 🌟 အရှင်းဆုံးစနစ်: တက်လာသမျှ Data ကို Database ထဲသာ တိုက်ရိုက် ပေါင်းထည့်မည် 🌟
+# 🌟 အစ်ကို၏ Logic ဖြင့် အရှင်းဆုံး Data တွက်ချက်သည့် စနစ် 🌟
 def calculate_and_sync_usage(all_keys):
     conn = get_db()
     c = conn.cursor()
@@ -134,16 +134,18 @@ def calculate_and_sync_usage(all_keys):
             last = int(db_plans[kid]['last'])
 
             if curr_b >= last:
+                # ပုံမှန်သုံးနေသည့်အချိန် (ကွာခြားချက်ကိုသာ ယူမည်)
                 delta = curr_b - last
             else:
-                # Server ပြောင်းခြင်း၊ API ပြောင်းခြင်းစသည်ဖြင့် 0 ပြန်ဖြစ်သွားပါက
-                # အသစ်တက်လာသော Data ကိုသာ ဆက်ပေါင်းထည့်မည်
+                # Server ပြောင်းခြင်း၊ Restart ကျခြင်းကြောင့် Data ငယ်သွားလျှင် 
+                # အသစ်တက်လာသော Data ကို တိုက်ရိုက်ယူမည်
                 delta = curr_b 
 
-            acc += delta
-            last = curr_b
+            if delta > 0 or curr_b < last:
+                acc += delta
+                last = curr_b
+                c.execute("UPDATE plans SET accumulated_bytes=%s, last_known_bytes=%s WHERE key_id=%s", (acc, last, kid))
             
-            c.execute("UPDATE plans SET accumulated_bytes=%s, last_known_bytes=%s WHERE key_id=%s", (acc, last, kid))
             usage_dict[kid] = acc
         else:
             usage_dict[kid] = curr_b
@@ -395,12 +397,14 @@ async def set_api_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) != 2: return await update.message.reply_text("❌ အသုံးပြုပုံ မှားယွင်းနေပါသည်။ ဥပမာ - `/setapi API_URL CERT_SHA256`", parse_mode='Markdown')
     conn = get_db()
     c = conn.cursor()
+    
+    # 🌟 Logic အသစ်အရ Data များကို မိနစ်တိုင်း သိမ်းနေပြီဖြစ်သဖြင့် ဤနေရာတွင် ဘာမှ ထပ်လုပ်စရာမလိုတော့ပါ 🌟
     upsert_q = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
     c.execute(upsert_q, ('outline_api_url', context.args[0]))
     c.execute(upsert_q, ('outline_cert_sha256', context.args[1]))
     conn.commit()
     conn.close()
-    await update.message.reply_text("✅ Outline API ပြောင်းလဲခြင်း အောင်မြင်ပါသည်။")
+    await update.message.reply_text("✅ Outline API အသစ်သို့ ပြောင်းလဲခြင်း အောင်မြင်ပါသည်။ (Data အဟောင်းများ အလိုအလျောက် ဆက်လက်တည်ရှိနေပါမည်)")
 
 async def send_rating_request(context: ContextTypes.DEFAULT_TYPE):
     user_id = context.job.data
@@ -529,7 +533,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             c.execute("SELECT value FROM settings WHERE key='aws_instance_name'")
             aws_iname = c.fetchone()
             
-            # 🌟 Admin Stats ကို accumulated_bytes ကနေပဲ တိုက်ရိုက်ယူမည် 🌟
             c.execute("SELECT accumulated_bytes FROM plans WHERE is_active=1")
             all_active_usage = c.fetchall()
             conn.close()
@@ -603,7 +606,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             matched_key = next((k for k in all_keys if str(k.key_id) == str(kid)), None)
             final_url = f"{matched_key.access_url.split('#')[0]}#{matched_key.name or f'Key_{kid}'}" if matched_key else "Not Found"
             
-            # 🌟 Database အသားတင်ပမာဏကိုသာ ယူမည် 🌟
             used_gb = (acc_bytes or 0) / 1e9
             
             if dlimit:
@@ -691,7 +693,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = "👤 **လက်ရှိ Plan နှင့် မှတ်တမ်းများ**\n\n"
         for ptype, dlimit, sdate, edate, acc_bytes, is_active, exp_at in user_plans:
             
-            # 🌟 Database အသားတင်ပမာဏကိုသာ ယူမည် 🌟
             used_gb = (acc_bytes or 0) / 1e9
             disp_plan = next((details['display'] for key, details in plans_dict.items() if details['plan_type'] == ptype), ptype)
             
@@ -699,7 +700,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 status_text = "🟢 **Active (အသုံးပြုနေဆဲ)**"
             else:
                 if dlimit and used_gb >= (dlimit / 1e9) * 0.99: 
-                    # 🌟 Data ပြည့်၍ Expire ဖြစ်ပါက တိကျစွာ ပြပေးမည် 🌟
                     status_text = f"🔴 **Expired (Data ပြည့်သွားပါပြီ - {used_gb:.2f}GB / {dlimit/1e9:.0f}GB)**"
                 else:
                     status_text = "🔴 **Expired (သက်တမ်း ကုန်သွားပါပြီ)**" 
@@ -835,7 +835,7 @@ async def fb_approval_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             requests.post(url, json={"recipient": {"id": fb_psid}, "message": {"text": promo_msg}})
 
             if res.status_code == 200: await query.edit_message_caption(caption=f"{query.message.caption_html}\n\n✅ **Approved & Key Sent to FB User!**\nKey: <code>{key_name}</code>", parse_mode='HTML')
-            else: await query.edit_message_caption(caption=f"{query.message.caption_html}\n\n❌ **FB သို့ စပို့မရပါ။ Error:**\n<code>{res.text}</code>", parse_mode='HTML')
+            else: await query.edit_message_caption(caption=f"{query.message.caption_html}\n\n❌ **FB သို့ စာပို့မရပါ။ Error:**\n<code>{res.text}</code>", parse_mode='HTML')
 
         except Exception as e:
             await query.edit_message_caption(caption=f"{query.message.caption_html}\n\n❌ **System Error:**\n<code>{str(e)}</code>", parse_mode='HTML')
@@ -885,7 +885,6 @@ async def check_expired_keys(context: ContextTypes.DEFAULT_TYPE):
                     c.execute("UPDATE plans SET is_active = 0, expired_at = %s WHERE key_id = %s", (now_str, kid))
                     
                     if is_expired_data:
-                        # 🌟 Auto ပို့သည့်စာတွင်လည်း တိကျစွာ ပြမည် 🌟
                         msg = f"⚠️ **အသိပေးချက်:** လူကြီးမင်း၏ Plan သည် သတ်မှတ် Data ပမာဏ ({total_used/1e9:.2f}GB / {dlimit/1e9:.0f}GB) ပြည့်သွားပါပြီ။\nမှတ်တမ်းကို Bot တွင် (၅) ရက်အထိ ဆက်လက်ကြည့်ရှုနိုင်ပါသည်။"
                     else:
                         msg = "⚠️ **Free Trial** ကုန်ဆုံးပါပြီ。" if ptype == "FreeTrial" else "⚠️ **VPN သက်တမ်း** ကုန်ဆုံးသွားပါပြီ。\nမှတ်တမ်းကို Bot တွင် (၅) ရက်အထိ ဆက်လက်ကြည့်ရှုနိုင်ပါသည်။"
