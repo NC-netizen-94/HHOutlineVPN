@@ -100,8 +100,11 @@ def init_db():
 
     c.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''')
     upsert_query = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
-    c.execute(upsert_query, ('outline_api_url', 'https://52.74.77.216:3584/j55zpDNtFPRSEVGYYK__XQ'))
-    c.execute(upsert_query, ('outline_cert_sha256', '15AABC7E72C56F04C1DB2953ABD078D0ECAC4DF72F59C83D3090015882D0954A'))
+    
+    # 🌟 အစ်ကိုပေးသော API အသစ်နှင့် Cert ကို ပြောင်းလဲထည့်သွင်းထားပါသည် 🌟
+    c.execute(upsert_query, ('outline_api_url', 'https://79.108.225.57:15007/lmaknRpnP3iUhi63azTSHw'))
+    c.execute(upsert_query, ('outline_cert_sha256', 'C3DE1FD3FD8AA147B9B3CAA2EADDC55D3EF829089C709D27CBF1158FA32B5228'))
+    
     ignore_query = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING"
     c.execute(ignore_query, ('total_server_gb', '2000'))
     c.execute('''CREATE TABLE IF NOT EXISTS plan_configs (plan_key TEXT PRIMARY KEY, short_name TEXT, display_name TEXT, plan_type TEXT, data_gb INT, months INT)''')
@@ -224,6 +227,13 @@ def generate_vpn_key(telegram_id, plan_type, data_gb=None, months=None):
     client.rename_key(new_key.key_id, suffix)
     data_bytes = data_gb * 1e9 if data_gb else None
     
+    # 🌟 Outline Server ပေါ်တွင် Data Limit အမှန်တကယ် သတ်မှတ်ပေးမည့်အပိုင်း (ပြန်ထည့်ထားပါသည်) 🌟
+    if data_bytes:
+        try:
+            client.add_data_limit(new_key.key_id, int(data_bytes))
+        except Exception as e:
+            logging.error(f"Failed to set data limit on outline server: {e}")
+
     c.execute('''INSERT INTO plans (telegram_id, key_id, plan_type, data_limit, start_date, end_date, is_active, username) VALUES (%s, %s, %s, %s, %s, %s, 1, %s)''', (telegram_id, new_key.key_id, plan_type, data_bytes, db_start_date, db_end_date, raw_username))
     conn.close()
     final_url = f"{new_key.access_url.split('#')[0]}#{urllib.parse.quote(suffix)}"
@@ -407,7 +417,6 @@ async def set_api_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     c = conn.cursor()
     
     # 🌟 API အသစ်ပြောင်းတိုင်း လက်ရှိ Data (last_known_bytes) ကို အဟောင်းစာရင်း (accumulated_bytes) ထဲသို့ အပြီးတိုင် သော့ခတ်ပေါင်းထည့်မည် 🌟
-    # ဤသို့ပြုလုပ်ခြင်းဖြင့် API အသစ်မှ တက်လာမည့် Data များကို ကွက်တိ ဆက်လက်ပေါင်းထည့်နိုင်မည်ဖြစ်သည်။
     c.execute("UPDATE plans SET accumulated_bytes = accumulated_bytes + last_known_bytes, last_known_bytes = 0 WHERE is_active = 1")
     
     upsert_q = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
