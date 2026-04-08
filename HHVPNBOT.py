@@ -104,8 +104,8 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''')
     
     # 🌟 အစ်ကို၏ API & Cert အသစ် 🌟
-    NEW_API_URL = 'https://79.108.225.57:15007/lmaknRpnP3iUhi63azTSHw'
-    NEW_CERT = 'C3DE1FD3FD8AA147B9B3CAA2EADDC55D3EF829089C709D27CBF1158FA32B5228'
+    NEW_API_URL = 'https://52.74.77.216:29767/NCLGGO49H9sWMRU9cl2J8Q'
+    NEW_CERT = '2AE1B98CE5174CC70FF85DE09225A7510A1DF05CB8C80406E12258BA0DFE0D14'
 
     # 🌟 SCRIPT မှ API အလိုအလျောက် ပြောင်းလဲမှုကို သိရှိမည့်စနစ် (AUTO SERVER-CHANGE DETECT) 🌟
     c.execute("SELECT value FROM settings WHERE key='outline_api_url'")
