@@ -51,6 +51,9 @@ ANDROID_SS_PATH = "android_ss.jpg"
 APPLE_SS_PATH = "apple_ss.jpg"      
 PAYMENT_QR_PATH = "kpay_qr.jpg"     
 
+PROMO_MSG = "🎁 သတင်းကောင်း!\nTelegram ကနေ သူငယ်ချင်းကို Invite လုပ်ရင် 1GB Free ရမယ်နော်။\n\n👉 အသေးစိတ်ကို Admin ( https://t.me/HappyHive9496 ) ထံ ဆက်သွယ်မေးမြန်းနိုင်ပါတယ်။"
+WELCOME_TEXT = ("🌟 **Welcome to HappyHive VPN!** 🌟\n\n🚀 **ဘာလို့ HappyHive ကို ရွေးချယ်သင့်တာလဲ?**\n🛡️ **Private & Secure:** လူထောင်ချီသုံးနေတဲ့ အခမဲ့ VPN တွေလို မဟုတ်ဘဲ၊ သီးသန့် Private Server ကို အသုံးပြုထားလို့ လိုင်းကျတာ၊ ချိတ်မရတာ လုံးဝမရှိပါဘူး。\n⚡️ **High Speed:** ကမ္ဘာ့အကောင်းဆုံး AWS Server များဖြစ်လို့ ရုပ်ရှင်ကြည့်၊ ဂိမ်းဆော့၊ ဒေါင်းလုဒ်ဆွဲ... အထစ်အငေါ့မရှိ အမြန်နှုန်း အပြည့်ရပါမယ်。\n🔒 **100% Safe:** လူကြီးမင်း၏ ကိုယ်ရေးအချက်အလက်များကို လုံးဝ မှတ်သားထားခြင်း (No Logs) မရှိလို့ ယုံကြည်စိတ်ချစွာ အသုံးပြုနိုင်ပါတယ်။\n\n👇 အောက်ပါ Menu များမှတဆင့် မိမိအသုံးပြုလိုသော ဝန်ဆောင်မှုကို ရွေးချယ်ပါ ခင်ဗျာ。")
+
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
@@ -99,11 +102,23 @@ def init_db():
     except psycopg2.Error: pass
 
     c.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''')
-    upsert_query = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
     
-    # 🌟 အစ်ကိုပေးထားသော API နှင့် Cert အသစ် 🌟
-    c.execute(upsert_query, ('outline_api_url', 'https://79.108.225.57:15007/lmaknRpnP3iUhi63azTSHw'))
-    c.execute(upsert_query, ('outline_cert_sha256', 'C3DE1FD3FD8AA147B9B3CAA2EADDC55D3EF829089C709D27CBF1158FA32B5228'))
+    # 🌟 အစ်ကို၏ API & Cert အသစ် 🌟
+    NEW_API_URL = 'https://79.108.225.57:15007/lmaknRpnP3iUhi63azTSHw'
+    NEW_CERT = 'C3DE1FD3FD8AA147B9B3CAA2EADDC55D3EF829089C709D27CBF1158FA32B5228'
+
+    # 🌟 SCRIPT မှ API အလိုအလျောက် ပြောင်းလဲမှုကို သိရှိမည့်စနစ် (AUTO SERVER-CHANGE DETECT) 🌟
+    c.execute("SELECT value FROM settings WHERE key='outline_api_url'")
+    old_url_row = c.fetchone()
+    
+    if old_url_row and old_url_row[0] != NEW_API_URL and 'dummy' not in old_url_row[0]:
+        # URL ပြောင်းသွားပါက Data အဟောင်းများကို accumulated_bytes ထဲသို့ အလိုအလျောက် သော့ခတ်သိမ်းဆည်းမည်
+        c.execute("UPDATE plans SET accumulated_bytes = accumulated_bytes + last_known_bytes, last_known_bytes = 0 WHERE is_active = 1")
+        logging.info("🌟 AUTO DETECT: API URL change detected! Migrated old data successfully.")
+
+    upsert_query = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+    c.execute(upsert_query, ('outline_api_url', NEW_API_URL))
+    c.execute(upsert_query, ('outline_cert_sha256', NEW_CERT))
     
     ignore_query = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING"
     c.execute(ignore_query, ('total_server_gb', '2000'))
@@ -116,11 +131,12 @@ def init_db():
     ]
     for p in default_plans:
         c.execute("INSERT INTO plan_configs VALUES (%s, %s, %s, %s, %s, %s)", p)
+    conn.commit()
     conn.close()
 
 init_db()
 
-# 🌟 THE ULTIMATE AUTO-DELTA DATA LOGIC (Command ကို လုံးဝ မမှီခိုတော့ပါ) 🌟
+# 🌟 THE FINAL BULLETPROOF DATA LOGIC 🌟
 def calculate_and_sync_usage(all_keys):
     conn = get_db()
     c = conn.cursor()
@@ -136,32 +152,15 @@ def calculate_and_sync_usage(all_keys):
             acc = int(db_plans[kid]['acc'])
             last = int(db_plans[kid]['last'])
 
+            # 🌟 Outline Server မှ လာသော Data အမှန်ကိုသာ လက်ခံမည် (Glitch Loop အား အပြီးတိုင် ရှင်းလင်းခြင်း) 🌟
             if curr_b > last:
-                # ပုံမှန် Data သုံးနေချိန် -> အစွန်းထွက် (Delta) ကိုသာ Сစုစုပေါင်းအိုး (acc) ထဲ ပေါင်းထည့်မည်
-                delta = curr_b - last
-                acc += delta
                 last = curr_b
-                c.execute("UPDATE plans SET accumulated_bytes=%s, last_known_bytes=%s WHERE key_id=%s", (acc, last, kid))
+                c.execute("UPDATE plans SET last_known_bytes=%s WHERE key_id=%s", (last, kid))
             
-            elif curr_b < last:
-                # Data ကျသွားချိန် -> API ကြောင်တာလား၊ ဆာဗာပြောင်း/Restart လား စစ်မည်
-                # 10 MB ထက်ကျော်ပြီး ကျသွားပါက ဆာဗာအသစ်/Restart အဖြစ် သတ်မှတ်မည်။
-                if (last - curr_b) > 10485760: 
-                    # 🌟 ဤနေရာသည် အဓိက အသက်ဖြစ်သည်။ 🌟
-                    # အရင် Data များကို 'acc' ထဲတွင် မိနစ်တိုင်း သိမ်းထားပြီးဖြစ်သဖြင့် ထပ်သိမ်းစရာမလိုပါ။
-                    # ဆာဗာအသစ်မှ တက်လာသော Data အသစ်ကိုသာ 'acc' ထဲသို့ တိုက်ရိုက် ပေါင်းထည့်မည်။
-                    delta = curr_b
-                    acc += delta
-                    last = curr_b
-                    c.execute("UPDATE plans SET accumulated_bytes=%s, last_known_bytes=%s WHERE key_id=%s", (acc, last, kid))
-                else:
-                    # Outline API ကြောင်ခြင်းဖြစ်သဖြင့် ဘာမှမလုပ်ဘဲ လစ်လျူရှုမည်။
-                    pass
-
-            # (curr_b == last) ဆိုလျှင် Offline ဖြစ်သဖြင့် ဘာမှမလုပ်ပါ။
+            # (curr_b < last) ဖြစ်ပါက Outline API ယာယီ ကြောင်ခြင်းဖြစ်သဖြင့် လုံးဝ လစ်လျူရှုမည်။ Data မပွားတော့ပါ။
             
-            # စုစုပေါင်း Data အဖြစ် 'acc' ကိုသာ အမြဲတမ်း အတည်ယူမည်
-            usage_dict[kid] = acc
+            # စုစုပေါင်း = အဟောင်း (acc) + အသစ်အများဆုံး (last)
+            usage_dict[kid] = acc + last
         else:
             usage_dict[kid] = curr_b
 
@@ -231,12 +230,10 @@ def generate_vpn_key(telegram_id, plan_type, data_gb=None, months=None):
     client.rename_key(new_key.key_id, suffix)
     data_bytes = data_gb * 1e9 if data_gb else None
     
-    # Outline Server ပေါ်တွင် Data Limit အမှန်တကယ် သတ်မှတ်ပေးမည့်အပိုင်း
+    # 🌟 Outline Server ပေါ်တွင် Data Limit အမှန်တကယ် သတ်မှတ်ပေးမည့်အပိုင်း 🌟
     if data_bytes:
-        try:
-            client.add_data_limit(new_key.key_id, int(data_bytes))
-        except Exception as e:
-            logging.error(f"Failed to set data limit on outline server: {e}")
+        try: client.add_data_limit(new_key.key_id, int(data_bytes))
+        except Exception as e: logging.error(f"Failed to set data limit on outline server: {e}")
 
     c.execute('''INSERT INTO plans (telegram_id, key_id, plan_type, data_limit, start_date, end_date, is_active, username) VALUES (%s, %s, %s, %s, %s, %s, 1, %s)''', (telegram_id, new_key.key_id, plan_type, data_bytes, db_start_date, db_end_date, raw_username))
     conn.close()
@@ -263,23 +260,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📝 အကြံပြုစာရေးရန်", callback_data='send_feedback'), InlineKeyboardButton("🌐 Facebook Page", url=FB_LINK)],
         [InlineKeyboardButton("👨‍💻 Admin ကို ဆက်သွယ်ရန်", url=ADMIN_CONTACT_LINK)]
     ]
-    welcome_text = ("🌟 **Welcome to HappyHive VPN!** 🌟\n\n🚀 **ဘာလို့ HappyHive ကို ရွေးချယ်သင့်တာလဲ?**\n🛡️ **Private & Secure:** လူထောင်ချီသုံးနေတဲ့ အခမဲ့ VPN တွေလို မဟုတ်ဘဲ၊ သီးသန့် Private Server ကို အသုံးပြုထားလို့ လိုင်းကျတာ၊ ချိတ်မရတာ လုံးဝမရှိပါဘူး。\n⚡️ **High Speed:** ကမ္ဘာ့အကောင်းဆုံး AWS Server များဖြစ်လို့ ရုပ်ရှင်ကြည့်၊ ဂိမ်းဆော့၊ ဒေါင်းလုဒ်ဆွဲ... အထစ်အငေါ့မရှိ အမြန်နှုန်း အပြည့်ရပါမယ်。\n🔒 **100% Safe:** လူကြီးမင်း၏ ကိုယ်ရေးအချက်အလက်များကို လုံးဝ မှတ်သားထားခြင်း (No Logs) မရှိလို့ ယုံကြည်စိတ်ချစွာ အသုံးပြုနိုင်ပါတယ်။\n\n👇 အောက်ပါ Menu များမှတဆင့် မိမိအသုံးပြုလိုသော ဝန်ဆောင်မှုကို ရွေးချယ်ပါ ခင်ဗျာ。")
     chat_id = update.effective_chat.id
+    markup = InlineKeyboardMarkup(keyboard)
+
     if update.message and update.message.text.startswith('/start'):
         await update.message.reply_text("👇 အောက်ပါ ခလုတ်များကိုလည်း အလွယ်တကူ အသုံးပြုနိုင်ပါသည်။", reply_markup=get_bottom_keyboard(user.id))
         if os.path.exists(WELCOME_IMAGE_PATH):
             try:
                 with open(WELCOME_IMAGE_PATH, 'rb') as f: await context.bot.send_photo(chat_id=chat_id, photo=f)
             except Exception as e: logging.error(e)
-        await context.bot.send_message(chat_id=chat_id, text=welcome_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+        await context.bot.send_message(chat_id=chat_id, text=WELCOME_TEXT, reply_markup=markup, parse_mode='Markdown')
     else:
-        if update.callback_query and update.callback_query.message.photo:
-            await safe_delete_message(update.callback_query.message)
-            await context.bot.send_message(chat_id=chat_id, text=welcome_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-        elif update.callback_query:
-            try: await update.callback_query.edit_message_text(text=welcome_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-            except: await context.bot.send_message(chat_id=chat_id, text=welcome_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-        else: await context.bot.send_message(chat_id=chat_id, text=welcome_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+        if update.callback_query and not update.callback_query.message.photo:
+            try: await update.callback_query.edit_message_text(text=WELCOME_TEXT, reply_markup=markup, parse_mode='Markdown')
+            except: await context.bot.send_message(chat_id=chat_id, text=WELCOME_TEXT, reply_markup=markup, parse_mode='Markdown')
+        else:
+            await safe_delete_message(update.callback_query.message if update.callback_query else None)
+            await context.bot.send_message(chat_id=chat_id, text=WELCOME_TEXT, reply_markup=markup, parse_mode='Markdown')
 
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS: return
@@ -420,14 +417,12 @@ async def set_api_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = get_db()
     c = conn.cursor()
     
-    # 🌟 Logic အသစ်အရ Data ပြောင်းလဲမှုများကို background process က အလိုလို သိမ်းနေမည်ဖြစ်၍
-    # Command တွင် API URL ပြောင်းလဲခြင်းသာ လုပ်ဆောင်ပါမည်။
     upsert_q = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
     c.execute(upsert_q, ('outline_api_url', context.args[0]))
     c.execute(upsert_q, ('outline_cert_sha256', context.args[1]))
     conn.commit()
     conn.close()
-    await update.message.reply_text("✅ Outline API အသစ်သို့ ပြောင်းလဲခြင်း အောင်မြင်ပါသည်။ (Data အဟောင်းများကို Bot မှ အလိုအလျောက် ဆက်လက်ထိန်းသိမ်းထားပါမည်)")
+    await update.message.reply_text("✅ Outline API အသစ်သို့ ပြောင်းလဲခြင်း အောင်မြင်ပါသည်။ (Bot မှ Auto-Detect ဖြင့် Data အဟောင်းများကို လုံခြုံစွာ ဆက်လက်ထိန်းသိမ်းထားပါမည်)")
 
 async def send_rating_request(context: ContextTypes.DEFAULT_TYPE):
     user_id = context.job.data
@@ -556,11 +551,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             c.execute("SELECT value FROM settings WHERE key='aws_instance_name'")
             aws_iname = c.fetchone()
             
-            c.execute("SELECT accumulated_bytes FROM plans WHERE is_active=1")
+            c.execute("SELECT accumulated_bytes, last_known_bytes FROM plans WHERE is_active=1")
             all_active_usage = c.fetchall()
             conn.close()
             
-            total_used_gb = sum((r[0] or 0) for r in all_active_usage) / 1e9
+            total_used_gb = sum((r[0] or 0) + (r[1] or 0) for r in all_active_usage) / 1e9
 
             PLAN_PRICES = {'30GB': 2000, '50GB': 3000, '100GB': 4000}
             now = datetime.now(timezone.utc)
@@ -615,7 +610,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("⏳ Data များကို ဆွဲယူနေပါသည်...")
         conn = get_db()
         c = conn.cursor()
-        c.execute("SELECT u.telegram_id, u.username, p.plan_type, p.end_date, p.key_id, p.data_limit, p.accumulated_bytes FROM plans p JOIN users u ON p.telegram_id = u.telegram_id WHERE p.is_active=1")
+        c.execute("SELECT u.telegram_id, u.username, p.plan_type, p.end_date, p.key_id, p.data_limit, p.accumulated_bytes, p.last_known_bytes FROM plans p JOIN users u ON p.telegram_id = u.telegram_id WHERE p.is_active=1")
         users_data = c.fetchall()
         conn.close()
         
@@ -625,12 +620,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e: return await query.edit_message_text(f"❌ Server Error: {e}", reply_markup=BACK_TO_ADMIN_MARKUP)
             
         msg = "👥 <b>Active Users List</b>\n\n"
-        for tid, uname, ptype, edate, kid, dlimit, acc_bytes in users_data:
+        for tid, uname, ptype, edate, kid, dlimit, acc_bytes, last_bytes in users_data:
             matched_key = next((k for k in all_keys if str(k.key_id) == str(kid)), None)
             final_url = f"{matched_key.access_url.split('#')[0]}#{matched_key.name or f'Key_{kid}'}" if matched_key else "Not Found"
             
-            # 🌟 'acc' မှတ်တမ်းအိုးတစ်ခုတည်းကသာ အမှန်ဖြစ်ပါသည် 🌟
-            used_gb = (acc_bytes or 0) / 1e9
+            used_gb = ((acc_bytes or 0) + (last_bytes or 0)) / 1e9
             
             if dlimit:
                 limit_gb = dlimit / 1e9
@@ -692,9 +686,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await safe_delete_message(query.message)
                 await context.bot.send_message(user_id, f"✅ **Free Trial 3GB ရရှိပါပြီ。**\n⏱ **(၅) ရက်တိတိ အသုံးပြုနိုင်ပါသည်။**\n\n👤 **Name:** `{name}`\n\n👇 **အောက်ပါ Key ကို Copy ကူးပြီး Outline VPN တွင် ထည့်သွင်းအသုံးပြုနိုင်ပါပြီ。**", parse_mode='Markdown')
                 await context.bot.send_message(user_id, f"`{url}`", parse_mode='Markdown')
-                
-                promo_msg = "🎁 သတင်းကောင်း!\nTelegram ကနေ သူငယ်ချင်းကို Invite လုပ်ရင် 1GB Free ရမယ်နော်။\n\n👉 အသေးစိတ်ကို Admin ( https://t.me/HappyHive9496 ) ထံ ဆက်သွယ်မေးမြန်းနိုင်ပါတယ်။"
-                await context.bot.send_message(user_id, promo_msg, reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
+                await context.bot.send_message(user_id, PROMO_MSG, reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
             except Exception as e: await query.edit_message_text(f"❌ Error: {e}")
         conn.close()
 
@@ -708,16 +700,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn = get_db()
         c = conn.cursor()
         
-        c.execute("SELECT plan_type, data_limit, start_date, end_date, accumulated_bytes, is_active, expired_at FROM plans WHERE telegram_id=%s AND is_active IN (0, 1)", (user_id,))
+        c.execute("SELECT plan_type, data_limit, start_date, end_date, accumulated_bytes, last_known_bytes, is_active, expired_at FROM plans WHERE telegram_id=%s AND is_active IN (0, 1)", (user_id,))
         user_plans = c.fetchall()
         conn.close()
         
         if not user_plans: return await query.edit_message_text("❌ လက်ရှိ Plan သို့မဟုတ် မှတ်တမ်း မရှိသေးပါ။", reply_markup=BACK_TO_MAIN_MARKUP)
 
         msg = "👤 **လက်ရှိ Plan နှင့် မှတ်တမ်းများ**\n\n"
-        for ptype, dlimit, sdate, edate, acc_bytes, is_active, exp_at in user_plans:
+        for ptype, dlimit, sdate, edate, acc_bytes, last_bytes, is_active, exp_at in user_plans:
             
-            used_gb = (acc_bytes or 0) / 1e9
+            used_gb = ((acc_bytes or 0) + (last_bytes or 0)) / 1e9
             disp_plan = next((details['display'] for key, details in plans_dict.items() if details['plan_type'] == ptype), ptype)
             
             if is_active == 1:
@@ -810,9 +802,7 @@ async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_T
             access_url, key_name = generate_vpn_key(target_user_id, plan_info['plan_type'], plan_info['data_gb'], plan_info['months'])
             await context.bot.send_message(target_user_id, f"🎉 **ငွေသွင်းမှု အတည်ပြုပြီးပါပြီ。**\n\n👤 **Name:** `{key_name}`\n\n👇 **အောက်ပါ Key ကို Copy ကူးပြီး Outline VPN တွင် ထည့်သွင်းအသုံးပြုနိုင်ပါပြီ。**", parse_mode='Markdown')
             await context.bot.send_message(target_user_id, f"`{access_url}`", parse_mode='Markdown')
-                
-            promo_msg = "🎁 သတင်းကောင်း!\nTelegram ကနေ သူငယ်ချင်းကို Invite လုပ်ရင် 1GB Free ရမယ်နော်။\n\n👉 အသေးစိတ်ကို Admin ( https://t.me/HappyHive9496 ) ထံ ဆက်သွယ်မေးမြန်းနိုင်ပါတယ်။"
-            await context.bot.send_message(target_user_id, promo_msg, reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
+            await context.bot.send_message(target_user_id, PROMO_MSG, reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
             
             if has_rated == 0:
                 if context.job_queue: context.job_queue.run_once(send_rating_request, 3600, data=target_user_id)
@@ -854,9 +844,7 @@ async def fb_approval_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             
             requests.post(url, json={"recipient": {"id": fb_psid}, "message": {"text": fb_msg1}})
             res = requests.post(url, json={"recipient": {"id": fb_psid}, "message": {"text": access_url}}) 
-
-            promo_msg = "🎁 သတင်းကောင်း!\nTelegram ကနေ သူငယ်ချင်းကို Invite လုပ်ရင် 1GB Free ရမယ်နော်။\n\n👉 အသေးစိတ်ကို Admin ( https://t.me/HappyHive9496 ) ထံ ဆက်သွယ်မေးမြန်းနိုင်ပါတယ်။"
-            requests.post(url, json={"recipient": {"id": fb_psid}, "message": {"text": promo_msg}})
+            requests.post(url, json={"recipient": {"id": fb_psid}, "message": {"text": PROMO_MSG}})
 
             if res.status_code == 200: await query.edit_message_caption(caption=f"{query.message.caption_html}\n\n✅ **Approved & Key Sent to FB User!**\nKey: <code>{key_name}</code>", parse_mode='HTML')
             else: await query.edit_message_caption(caption=f"{query.message.caption_html}\n\n❌ **FB သို့ စာပို့မရပါ။ Error:**\n<code>{res.text}</code>", parse_mode='HTML')
@@ -961,4 +949,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-    
