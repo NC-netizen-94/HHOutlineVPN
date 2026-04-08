@@ -117,6 +117,7 @@ def init_db():
 
 init_db()
 
+# 🌟 အရှင်းဆုံးစနစ်: တက်လာသမျှ Data ကို Database ထဲသာ တိုက်ရိုက် ပေါင်းထည့်မည် 🌟
 def calculate_and_sync_usage(all_keys):
     conn = get_db()
     c = conn.cursor()
@@ -132,15 +133,18 @@ def calculate_and_sync_usage(all_keys):
             acc = int(db_plans[kid]['acc'])
             last = int(db_plans[kid]['last'])
 
-            if (last - curr_b) > (10 * 1024 * 1024):
-                acc += last
-                last = curr_b
-                c.execute("UPDATE plans SET accumulated_bytes=%s, last_known_bytes=%s WHERE key_id=%s", (acc, last, kid))
-            elif curr_b > last:
-                last = curr_b
-                c.execute("UPDATE plans SET last_known_bytes=%s WHERE key_id=%s", (last, kid))
+            if curr_b >= last:
+                delta = curr_b - last
+            else:
+                # Server ပြောင်းခြင်း၊ API ပြောင်းခြင်းစသည်ဖြင့် 0 ပြန်ဖြစ်သွားပါက
+                # အသစ်တက်လာသော Data ကိုသာ ဆက်ပေါင်းထည့်မည်
+                delta = curr_b 
 
-            usage_dict[kid] = acc + curr_b
+            acc += delta
+            last = curr_b
+            
+            c.execute("UPDATE plans SET accumulated_bytes=%s, last_known_bytes=%s WHERE key_id=%s", (acc, last, kid))
+            usage_dict[kid] = acc
         else:
             usage_dict[kid] = curr_b
 
@@ -394,6 +398,7 @@ async def set_api_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     upsert_q = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
     c.execute(upsert_q, ('outline_api_url', context.args[0]))
     c.execute(upsert_q, ('outline_cert_sha256', context.args[1]))
+    conn.commit()
     conn.close()
     await update.message.reply_text("✅ Outline API ပြောင်းလဲခြင်း အောင်မြင်ပါသည်။")
 
@@ -524,11 +529,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             c.execute("SELECT value FROM settings WHERE key='aws_instance_name'")
             aws_iname = c.fetchone()
             
-            c.execute("SELECT accumulated_bytes, last_known_bytes FROM plans WHERE is_active=1")
+            # 🌟 Admin Stats ကို accumulated_bytes ကနေပဲ တိုက်ရိုက်ယူမည် 🌟
+            c.execute("SELECT accumulated_bytes FROM plans WHERE is_active=1")
             all_active_usage = c.fetchall()
             conn.close()
             
-            total_used_gb = sum((r[0] or 0) + (r[1] or 0) for r in all_active_usage) / 1e9
+            total_used_gb = sum((r[0] or 0) for r in all_active_usage) / 1e9
 
             PLAN_PRICES = {'30GB': 2000, '50GB': 3000, '100GB': 4000}
             now = datetime.now(timezone.utc)
@@ -583,7 +589,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("⏳ Data များကို ဆွဲယူနေပါသည်...")
         conn = get_db()
         c = conn.cursor()
-        c.execute("SELECT u.telegram_id, u.username, p.plan_type, p.end_date, p.key_id, p.data_limit, p.accumulated_bytes, p.last_known_bytes FROM plans p JOIN users u ON p.telegram_id = u.telegram_id WHERE p.is_active=1")
+        c.execute("SELECT u.telegram_id, u.username, p.plan_type, p.end_date, p.key_id, p.data_limit, p.accumulated_bytes FROM plans p JOIN users u ON p.telegram_id = u.telegram_id WHERE p.is_active=1")
         users_data = c.fetchall()
         conn.close()
         
@@ -593,11 +599,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e: return await query.edit_message_text(f"❌ Server Error: {e}", reply_markup=BACK_TO_ADMIN_MARKUP)
             
         msg = "👥 <b>Active Users List</b>\n\n"
-        for tid, uname, ptype, edate, kid, dlimit, acc_bytes, last_bytes in users_data:
+        for tid, uname, ptype, edate, kid, dlimit, acc_bytes in users_data:
             matched_key = next((k for k in all_keys if str(k.key_id) == str(kid)), None)
             final_url = f"{matched_key.access_url.split('#')[0]}#{matched_key.name or f'Key_{kid}'}" if matched_key else "Not Found"
             
-            used_gb = ((acc_bytes or 0) + (last_bytes or 0)) / 1e9
+            # 🌟 Database အသားတင်ပမာဏကိုသာ ယူမည် 🌟
+            used_gb = (acc_bytes or 0) / 1e9
             
             if dlimit:
                 limit_gb = dlimit / 1e9
@@ -675,25 +682,27 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn = get_db()
         c = conn.cursor()
         
-        c.execute("SELECT plan_type, data_limit, start_date, end_date, accumulated_bytes, last_known_bytes, is_active, expired_at FROM plans WHERE telegram_id=%s AND is_active IN (0, 1)", (user_id,))
+        c.execute("SELECT plan_type, data_limit, start_date, end_date, accumulated_bytes, is_active, expired_at FROM plans WHERE telegram_id=%s AND is_active IN (0, 1)", (user_id,))
         user_plans = c.fetchall()
         conn.close()
         
         if not user_plans: return await query.edit_message_text("❌ လက်ရှိ Plan သို့မဟုတ် မှတ်တမ်း မရှိသေးပါ။", reply_markup=BACK_TO_MAIN_MARKUP)
 
         msg = "👤 **လက်ရှိ Plan နှင့် မှတ်တမ်းများ**\n\n"
-        for ptype, dlimit, sdate, edate, acc_bytes, last_bytes, is_active, exp_at in user_plans:
-            used_gb = ((acc_bytes or 0) + (last_bytes or 0)) / 1e9
+        for ptype, dlimit, sdate, edate, acc_bytes, is_active, exp_at in user_plans:
+            
+            # 🌟 Database အသားတင်ပမာဏကိုသာ ယူမည် 🌟
+            used_gb = (acc_bytes or 0) / 1e9
             disp_plan = next((details['display'] for key, details in plans_dict.items() if details['plan_type'] == ptype), ptype)
             
-            # 🌟 Expired အခြေအနေကို ခွဲခြား၍ တိကျစွာ ပြသခြင်း 🌟
             if is_active == 1:
                 status_text = "🟢 **Active (အသုံးပြုနေဆဲ)**"
             else:
-                if dlimit and used_gb >= (dlimit / 1e9) * 0.99: # Data ပြည့်၍ Expire ဖြစ်ပါက
+                if dlimit and used_gb >= (dlimit / 1e9) * 0.99: 
+                    # 🌟 Data ပြည့်၍ Expire ဖြစ်ပါက တိကျစွာ ပြပေးမည် 🌟
                     status_text = f"🔴 **Expired (Data ပြည့်သွားပါပြီ - {used_gb:.2f}GB / {dlimit/1e9:.0f}GB)**"
                 else:
-                    status_text = "🔴 **Expired (သက်တမ်း ကုန်သွားပါပြီ)**" # အချိန်ကုန်၍ Expire ဖြစ်ပါက
+                    status_text = "🔴 **Expired (သက်တမ်း ကုန်သွားပါပြီ)**" 
             
             msg += f"🔹 **Plan:** `{disp_plan}`\n"
             msg += f"📌 **Status:** {status_text}\n"
@@ -826,7 +835,7 @@ async def fb_approval_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             requests.post(url, json={"recipient": {"id": fb_psid}, "message": {"text": promo_msg}})
 
             if res.status_code == 200: await query.edit_message_caption(caption=f"{query.message.caption_html}\n\n✅ **Approved & Key Sent to FB User!**\nKey: <code>{key_name}</code>", parse_mode='HTML')
-            else: await query.edit_message_caption(caption=f"{query.message.caption_html}\n\n❌ **FB သို့ စာပို့မရပါ။ Error:**\n<code>{res.text}</code>", parse_mode='HTML')
+            else: await query.edit_message_caption(caption=f"{query.message.caption_html}\n\n❌ **FB သို့ စပို့မရပါ။ Error:**\n<code>{res.text}</code>", parse_mode='HTML')
 
         except Exception as e:
             await query.edit_message_caption(caption=f"{query.message.caption_html}\n\n❌ **System Error:**\n<code>{str(e)}</code>", parse_mode='HTML')
@@ -876,7 +885,7 @@ async def check_expired_keys(context: ContextTypes.DEFAULT_TYPE):
                     c.execute("UPDATE plans SET is_active = 0, expired_at = %s WHERE key_id = %s", (now_str, kid))
                     
                     if is_expired_data:
-                        # 🌟 Data ပြည့်၍ ပိတ်သွားပါက တိကျသော ပမာဏကို ပြပေးမည် 🌟
+                        # 🌟 Auto ပို့သည့်စာတွင်လည်း တိကျစွာ ပြမည် 🌟
                         msg = f"⚠️ **အသိပေးချက်:** လူကြီးမင်း၏ Plan သည် သတ်မှတ် Data ပမာဏ ({total_used/1e9:.2f}GB / {dlimit/1e9:.0f}GB) ပြည့်သွားပါပြီ။\nမှတ်တမ်းကို Bot တွင် (၅) ရက်အထိ ဆက်လက်ကြည့်ရှုနိုင်ပါသည်။"
                     else:
                         msg = "⚠️ **Free Trial** ကုန်ဆုံးပါပြီ。" if ptype == "FreeTrial" else "⚠️ **VPN သက်တမ်း** ကုန်ဆုံးသွားပါပြီ。\nမှတ်တမ်းကို Bot တွင် (၅) ရက်အထိ ဆက်လက်ကြည့်ရှုနိုင်ပါသည်။"
