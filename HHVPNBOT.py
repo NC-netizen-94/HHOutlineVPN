@@ -101,7 +101,7 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''')
     upsert_query = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
     
-    # 🌟 အစ်ကိုပေးသော API အသစ်နှင့် Cert ကို ပြောင်းလဲထည့်သွင်းထားပါသည် 🌟
+    # 🌟 အစ်ကိုပေးထားသော API နှင့် Cert အသစ် 🌟
     c.execute(upsert_query, ('outline_api_url', 'https://79.108.225.57:15007/lmaknRpnP3iUhi63azTSHw'))
     c.execute(upsert_query, ('outline_cert_sha256', 'C3DE1FD3FD8AA147B9B3CAA2EADDC55D3EF829089C709D27CBF1158FA32B5228'))
     
@@ -120,7 +120,7 @@ def init_db():
 
 init_db()
 
-# 🌟 THE FINAL BULLETPROOF DATA LOGIC 🌟
+# 🌟 THE ULTIMATE AUTO-DELTA DATA LOGIC (Command ကို လုံးဝ မမှီခိုတော့ပါ) 🌟
 def calculate_and_sync_usage(all_keys):
     conn = get_db()
     c = conn.cursor()
@@ -137,26 +137,30 @@ def calculate_and_sync_usage(all_keys):
             last = int(db_plans[kid]['last'])
 
             if curr_b > last:
-                # ကြီးနေရင် (Data သုံးနေတယ် = Online) -> အစွန်းထွက် ကွာခြားချက်ကိုသာ ပေါင်းထည့်မည်
+                # ပုံမှန် Data သုံးနေချိန် -> အစွန်းထွက် (Delta) ကိုသာ Сစုစုပေါင်းအိုး (acc) ထဲ ပေါင်းထည့်မည်
                 delta = curr_b - last
                 acc += delta
                 last = curr_b
                 c.execute("UPDATE plans SET accumulated_bytes=%s, last_known_bytes=%s WHERE key_id=%s", (acc, last, kid))
             
             elif curr_b < last:
-                # ငယ်နေရင် -> တကယ် Restart/Server Change လား၊ Outline ကြောင်တာလား စစ်မည်
-                # (10 MB = 10485760 bytes) ထက်ပိုပြီး ကွာဟချက်ကြီးမှသာ အသစ်တက်လာသော Data ကို ပေါင်းမည်
+                # Data ကျသွားချိန် -> API ကြောင်တာလား၊ ဆာဗာပြောင်း/Restart လား စစ်မည်
+                # 10 MB ထက်ကျော်ပြီး ကျသွားပါက ဆာဗာအသစ်/Restart အဖြစ် သတ်မှတ်မည်။
                 if (last - curr_b) > 10485760: 
+                    # 🌟 ဤနေရာသည် အဓိက အသက်ဖြစ်သည်။ 🌟
+                    # အရင် Data များကို 'acc' ထဲတွင် မိနစ်တိုင်း သိမ်းထားပြီးဖြစ်သဖြင့် ထပ်သိမ်းစရာမလိုပါ။
+                    # ဆာဗာအသစ်မှ တက်လာသော Data အသစ်ကိုသာ 'acc' ထဲသို့ တိုက်ရိုက် ပေါင်းထည့်မည်။
                     delta = curr_b
                     acc += delta
                     last = curr_b
                     c.execute("UPDATE plans SET accumulated_bytes=%s, last_known_bytes=%s WHERE key_id=%s", (acc, last, kid))
                 else:
-                    # 10 MB အောက် အနည်းငယ်သာ ကျသွားပါက Outline API ကြောင်ခြင်းဖြစ်သဖြင့် 
-                    # Data ပွားခြင်းမှ ကာကွယ်ရန် ဘာမှမလုပ်ဘဲ လစ်လျူရှုမည်။
+                    # Outline API ကြောင်ခြင်းဖြစ်သဖြင့် ဘာမှမလုပ်ဘဲ လစ်လျူရှုမည်။
                     pass
 
-            # (curr_b == last) ဆိုလျှင် Data မသုံးဘူး (Offline) ဟုယူဆကာ ဘာမှမလုပ်ဘဲ ကျော်သွားမည်။
+            # (curr_b == last) ဆိုလျှင် Offline ဖြစ်သဖြင့် ဘာမှမလုပ်ပါ။
+            
+            # စုစုပေါင်း Data အဖြစ် 'acc' ကိုသာ အမြဲတမ်း အတည်ယူမည်
             usage_dict[kid] = acc
         else:
             usage_dict[kid] = curr_b
@@ -227,7 +231,7 @@ def generate_vpn_key(telegram_id, plan_type, data_gb=None, months=None):
     client.rename_key(new_key.key_id, suffix)
     data_bytes = data_gb * 1e9 if data_gb else None
     
-    # 🌟 Outline Server ပေါ်တွင် Data Limit အမှန်တကယ် သတ်မှတ်ပေးမည့်အပိုင်း (ပြန်ထည့်ထားပါသည်) 🌟
+    # Outline Server ပေါ်တွင် Data Limit အမှန်တကယ် သတ်မှတ်ပေးမည့်အပိုင်း
     if data_bytes:
         try:
             client.add_data_limit(new_key.key_id, int(data_bytes))
@@ -416,15 +420,14 @@ async def set_api_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = get_db()
     c = conn.cursor()
     
-    # 🌟 API အသစ်ပြောင်းတိုင်း လက်ရှိ Data (last_known_bytes) ကို အဟောင်းစာရင်း (accumulated_bytes) ထဲသို့ အပြီးတိုင် သော့ခတ်ပေါင်းထည့်မည် 🌟
-    c.execute("UPDATE plans SET accumulated_bytes = accumulated_bytes + last_known_bytes, last_known_bytes = 0 WHERE is_active = 1")
-    
+    # 🌟 Logic အသစ်အရ Data ပြောင်းလဲမှုများကို background process က အလိုလို သိမ်းနေမည်ဖြစ်၍
+    # Command တွင် API URL ပြောင်းလဲခြင်းသာ လုပ်ဆောင်ပါမည်။
     upsert_q = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
     c.execute(upsert_q, ('outline_api_url', context.args[0]))
     c.execute(upsert_q, ('outline_cert_sha256', context.args[1]))
     conn.commit()
     conn.close()
-    await update.message.reply_text("✅ Outline API အသစ်သို့ ပြောင်းလဲခြင်းနှင့် ဆာဗာဟောင်းမှ Data များ သိမ်းဆည်းခြင်း အောင်မြင်ပါသည်။")
+    await update.message.reply_text("✅ Outline API အသစ်သို့ ပြောင်းလဲခြင်း အောင်မြင်ပါသည်။ (Data အဟောင်းများကို Bot မှ အလိုအလျောက် ဆက်လက်ထိန်းသိမ်းထားပါမည်)")
 
 async def send_rating_request(context: ContextTypes.DEFAULT_TYPE):
     user_id = context.job.data
@@ -553,11 +556,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             c.execute("SELECT value FROM settings WHERE key='aws_instance_name'")
             aws_iname = c.fetchone()
             
-            c.execute("SELECT accumulated_bytes, last_known_bytes FROM plans WHERE is_active=1")
+            c.execute("SELECT accumulated_bytes FROM plans WHERE is_active=1")
             all_active_usage = c.fetchall()
             conn.close()
             
-            total_used_gb = sum((r[0] or 0) + (r[1] or 0) for r in all_active_usage) / 1e9
+            total_used_gb = sum((r[0] or 0) for r in all_active_usage) / 1e9
 
             PLAN_PRICES = {'30GB': 2000, '50GB': 3000, '100GB': 4000}
             now = datetime.now(timezone.utc)
@@ -612,7 +615,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("⏳ Data များကို ဆွဲယူနေပါသည်...")
         conn = get_db()
         c = conn.cursor()
-        c.execute("SELECT u.telegram_id, u.username, p.plan_type, p.end_date, p.key_id, p.data_limit, p.accumulated_bytes, p.last_known_bytes FROM plans p JOIN users u ON p.telegram_id = u.telegram_id WHERE p.is_active=1")
+        c.execute("SELECT u.telegram_id, u.username, p.plan_type, p.end_date, p.key_id, p.data_limit, p.accumulated_bytes FROM plans p JOIN users u ON p.telegram_id = u.telegram_id WHERE p.is_active=1")
         users_data = c.fetchall()
         conn.close()
         
@@ -622,11 +625,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e: return await query.edit_message_text(f"❌ Server Error: {e}", reply_markup=BACK_TO_ADMIN_MARKUP)
             
         msg = "👥 <b>Active Users List</b>\n\n"
-        for tid, uname, ptype, edate, kid, dlimit, acc_bytes, last_bytes in users_data:
+        for tid, uname, ptype, edate, kid, dlimit, acc_bytes in users_data:
             matched_key = next((k for k in all_keys if str(k.key_id) == str(kid)), None)
             final_url = f"{matched_key.access_url.split('#')[0]}#{matched_key.name or f'Key_{kid}'}" if matched_key else "Not Found"
             
-            used_gb = ((acc_bytes or 0) + (last_bytes or 0)) / 1e9
+            # 🌟 'acc' မှတ်တမ်းအိုးတစ်ခုတည်းကသာ အမှန်ဖြစ်ပါသည် 🌟
+            used_gb = (acc_bytes or 0) / 1e9
             
             if dlimit:
                 limit_gb = dlimit / 1e9
@@ -704,16 +708,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn = get_db()
         c = conn.cursor()
         
-        c.execute("SELECT plan_type, data_limit, start_date, end_date, accumulated_bytes, last_known_bytes, is_active, expired_at FROM plans WHERE telegram_id=%s AND is_active IN (0, 1)", (user_id,))
+        c.execute("SELECT plan_type, data_limit, start_date, end_date, accumulated_bytes, is_active, expired_at FROM plans WHERE telegram_id=%s AND is_active IN (0, 1)", (user_id,))
         user_plans = c.fetchall()
         conn.close()
         
         if not user_plans: return await query.edit_message_text("❌ လက်ရှိ Plan သို့မဟုတ် မှတ်တမ်း မရှိသေးပါ။", reply_markup=BACK_TO_MAIN_MARKUP)
 
         msg = "👤 **လက်ရှိ Plan နှင့် မှတ်တမ်းများ**\n\n"
-        for ptype, dlimit, sdate, edate, acc_bytes, last_bytes, is_active, exp_at in user_plans:
+        for ptype, dlimit, sdate, edate, acc_bytes, is_active, exp_at in user_plans:
             
-            used_gb = ((acc_bytes or 0) + (last_bytes or 0)) / 1e9
+            used_gb = (acc_bytes or 0) / 1e9
             disp_plan = next((details['display'] for key, details in plans_dict.items() if details['plan_type'] == ptype), ptype)
             
             if is_active == 1:
@@ -957,3 +961,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+    
