@@ -15,7 +15,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotComm
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from outline_vpn.outline_vpn import OutlineVPN
 import requests
-import paramiko # <-- SSH ချိတ်ဆက်ရန်အတွက် အသစ်ထည့်ထားသည်
+import paramiko
 
 try:
     import boto3
@@ -103,21 +103,11 @@ def init_db():
     except psycopg2.Error: pass
 
     c.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''')
+    upsert_query = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
     
-    # 🌟 အစ်ကို၏ API & Cert အသစ် 🌟
     NEW_API_URL = 'https://79.108.225.57:15007/lmaknRpnP3iUhi63azTSHw'
     NEW_CERT = 'C3DE1FD3FD8AA147B9B3CAA2EADDC55D3EF829089C709D27CBF1158FA32B5228'
 
-    # 🌟 SCRIPT မှ API အလိုအလျောက် ပြောင်းလဲမှုကို သိရှိမည့်စနစ် (AUTO SERVER-CHANGE DETECT) 🌟
-    c.execute("SELECT value FROM settings WHERE key='outline_api_url'")
-    old_url_row = c.fetchone()
-    
-    if old_url_row and old_url_row[0] != NEW_API_URL and 'dummy' not in old_url_row[0]:
-        # URL ပြောင်းသွားပါက Data အဟောင်းများကို accumulated_bytes ထဲသို့ အလိုအလျောက် သော့ခတ်သိမ်းဆည်းမည်
-        c.execute("UPDATE plans SET accumulated_bytes = accumulated_bytes + last_known_bytes, last_known_bytes = 0 WHERE is_active = 1")
-        logging.info("🌟 AUTO DETECT: API URL change detected! Migrated old data successfully.")
-
-    upsert_query = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
     c.execute(upsert_query, ('outline_api_url', NEW_API_URL))
     c.execute(upsert_query, ('outline_cert_sha256', NEW_CERT))
     
@@ -137,7 +127,7 @@ def init_db():
 
 init_db()
 
-# 🌟 KAMATERA SSH TRAFFIC FUNCTION (အသစ်ထည့်ထားသည်) 🌟
+# 🌟 KAMATERA SSH TRAFFIC FUNCTION 🌟
 def get_kamatera_traffic(ip, password):
     try:
         client = paramiko.SSHClient()
@@ -161,7 +151,7 @@ def get_kamatera_traffic(ip, password):
         return None, None
 
 
-# 🌟 THE FINAL BULLETPROOF DATA LOGIC 🌟
+# 🌟 THE BULLETPROOF DELTA LOGIC (SERVER-SWITCH SAFE) 🌟
 def calculate_and_sync_usage(all_keys):
     conn = get_db()
     c = conn.cursor()
@@ -171,21 +161,34 @@ def calculate_and_sync_usage(all_keys):
     usage_dict = {}
     for k in all_keys:
         kid = str(k.key_id)
-        curr_b = int(getattr(k, 'used_bytes', 0) or 0)
+        
+        # API Glitch Filter: API မှ Data မပို့ပါက (None ဖြစ်နေပါက) ရောင်ရမ်းပြီး 0 သို့မပြောင်းစေရန် ကျော်သွားမည်။
+        raw_used = getattr(k, 'used_bytes', None)
+        if raw_used is None:
+            if kid in db_plans:
+                usage_dict[kid] = db_plans[kid]['acc']
+            continue
+            
+        curr_b = int(raw_used)
 
         if kid in db_plans:
             acc = int(db_plans[kid]['acc'])
             last = int(db_plans[kid]['last'])
 
-            # 🌟 Outline Server မှ လာသော Data အမှန်ကိုသာ လက်ခံမည် (Glitch Loop အား အပြီးတိုင် ရှင်းလင်းခြင်း) 🌟
-            if curr_b > last:
+            if curr_b >= last:
+                # ပုံမှန်အသုံးပြုမှု: ဆာဗာ Data က Database ထဲက Data ထက်များနေပါက အပို (Delta) ကိုသာ ပေါင်းထည့်မည်
+                delta = curr_b - last
+                acc += delta
                 last = curr_b
-                c.execute("UPDATE plans SET last_known_bytes=%s WHERE key_id=%s", (last, kid))
-            
-            # (curr_b < last) ဖြစ်ပါက Outline API ယာယီ ကြောင်ခြင်းဖြစ်သဖြင့် လုံးဝ လစ်လျူရှုမည်။ Data မပွားတော့ပါ။
-            
-            # စုစုပေါင်း = အဟောင်း (acc) + အသစ်အများဆုံး (last)
-            usage_dict[kid] = acc + last
+            else:
+                # ဆာဗာအသစ်ပြောင်းခြင်း: curr_b က last ထက်ငယ်သွားပါက ဆာဗာအသစ်ပြောင်းလိုက်သည်ဟု မှတ်ယူပြီး 
+                # အဟောင်း Data များကို လုံးဝမဖျက်ဘဲ (acc ကိုဆက်ထားပြီး) Data အသစ်များကို ထပ်ပေါင်းသွားမည်။
+                delta = curr_b
+                acc += delta
+                last = curr_b
+
+            c.execute("UPDATE plans SET accumulated_bytes=%s, last_known_bytes=%s WHERE key_id=%s", (acc, last, kid))
+            usage_dict[kid] = acc
         else:
             usage_dict[kid] = curr_b
 
@@ -254,11 +257,6 @@ def generate_vpn_key(telegram_id, plan_type, data_gb=None, months=None):
     
     client.rename_key(new_key.key_id, suffix)
     data_bytes = data_gb * 1e9 if data_gb else None
-    
-    # 🌟 Outline Server ပေါ်တွင် Data Limit အမှန်တကယ် သတ်မှတ်ပေးမည့်အပိုင်း 🌟
-    if data_bytes:
-        try: client.add_data_limit(new_key.key_id, int(data_bytes))
-        except Exception as e: logging.error(f"Failed to set data limit on outline server: {e}")
 
     c.execute('''INSERT INTO plans (telegram_id, key_id, plan_type, data_limit, start_date, end_date, is_active, username) VALUES (%s, %s, %s, %s, %s, %s, 1, %s)''', (telegram_id, new_key.key_id, plan_type, data_bytes, db_start_date, db_end_date, raw_username))
     conn.close()
@@ -310,8 +308,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("➕ Manual Key ထုတ်ရန်", callback_data='admin_manual_key'), InlineKeyboardButton("📝 Plan အမည်များ ပြင်ရန်", callback_data='admin_edit_plans')],
         [InlineKeyboardButton("📊 စီးပွားရေးနှင့် Server အခြေအနေ", callback_data='admin_server_stats'), InlineKeyboardButton("💽 Server Storage ပြင်ရန်", callback_data='admin_change_storage')],
         [InlineKeyboardButton("☁️ AWS ချိတ်ဆက်ရန်", callback_data='admin_aws_setup'), InlineKeyboardButton("💾 Database Backup ယူရန်", callback_data='admin_manual_backup')],
-        [InlineKeyboardButton("📢 Broadcast", callback_data='admin_broadcast'), InlineKeyboardButton("⚙️ Change API", callback_data='admin_change_api')],
-        [InlineKeyboardButton("🗑️ စနစ်တစ်ခုလုံး Reset ချရန်", callback_data='admin_reset_system')]
+        [InlineKeyboardButton("📢 Broadcast", callback_data='admin_broadcast'), InlineKeyboardButton("🗑️ စနစ်တစ်ခုလုံး Reset ချရန်", callback_data='admin_reset_system')]
     ]
     msg = "🛡️ **Admin Panel ရောက်ပါပြီ။**\n👇 လုပ်ဆောင်လိုသော မီနူးကို ရွေးချယ်ပါ။"
     if update.message: await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
@@ -436,19 +433,6 @@ async def delete_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     if deleted_plans > 0 or deleted_users > 0: await update.message.reply_text(f"✅ User ID `{target_id}` အား ဖျက်ပစ်လိုက်ပါပြီ。", parse_mode='Markdown')
     else: await update.message.reply_text(f"⚠️ User ID `{target_id}` ကို မတွေ့ပါ။", parse_mode='Markdown')
 
-async def set_api_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS: return
-    if len(context.args) != 2: return await update.message.reply_text("❌ အသုံးပြုပုံ မှားယွင်းနေပါသည်။ ဥပမာ - `/setapi API_URL CERT_SHA256`", parse_mode='Markdown')
-    conn = get_db()
-    c = conn.cursor()
-    
-    upsert_q = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
-    c.execute(upsert_q, ('outline_api_url', context.args[0]))
-    c.execute(upsert_q, ('outline_cert_sha256', context.args[1]))
-    conn.commit()
-    conn.close()
-    await update.message.reply_text("✅ Outline API အသစ်သို့ ပြောင်းလဲခြင်း အောင်မြင်ပါသည်။ (Bot မှ Auto-Detect ဖြင့် Data အဟောင်းများကို လုံခြုံစွာ ဆက်လက်ထိန်းသိမ်းထားပါမည်)")
-
 async def send_rating_request(context: ContextTypes.DEFAULT_TYPE):
     user_id = context.job.data
     kb = [[InlineKeyboardButton("⭐", callback_data='rate_1'), InlineKeyboardButton("⭐⭐", callback_data='rate_2'), InlineKeyboardButton("⭐⭐⭐", callback_data='rate_3')],
@@ -568,11 +552,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             row_gb = c.fetchone()
             total_server_gb = int(row_gb[0]) if row_gb else 2000
             
-            c.execute("SELECT accumulated_bytes, last_known_bytes FROM plans WHERE is_active=1")
+            c.execute("SELECT accumulated_bytes FROM plans WHERE is_active=1")
             all_active_usage = c.fetchall()
             conn.close()
             
-            total_used_gb = sum((r[0] or 0) + (r[1] or 0) for r in all_active_usage) / 1e9
+            total_used_gb = sum((r[0] or 0) for r in all_active_usage) / 1e9
 
             PLAN_PRICES = {'30GB': 2000, '50GB': 3000, '100GB': 4000}
             now = datetime.now(timezone.utc)
@@ -593,7 +577,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             warning_limit = total_server_gb * 0.7
             srv_status = f"🔴 <b>DANGER:</b> Server အသစ် အမြန်ဝယ်ရန် လိုအပ်နေပါပြီ。" if total_used_gb >= danger_limit else (f"🟡 <b>WARNING:</b> မကြာမီ Server အသစ်ဝယ်ရန် ပြင်ဆင်ထားပါ။" if total_used_gb >= warning_limit else "🟢 <b>NORMAL:</b> Server အခြေအနေ ကောင်းမွန်ပါသေးသည်။")
             
-            # 🌟 KAMATERA SSH SERVER TRAFFIC 🌟
             KAMATERA_IP = "79.108.225.57" 
             KAMATERA_PASS = "Showtee123!@#$"
             
@@ -636,7 +619,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("⏳ Data များကို ဆွဲယူနေပါသည်...")
         conn = get_db()
         c = conn.cursor()
-        c.execute("SELECT u.telegram_id, u.username, p.plan_type, p.end_date, p.key_id, p.data_limit, p.accumulated_bytes, p.last_known_bytes FROM plans p JOIN users u ON p.telegram_id = u.telegram_id WHERE p.is_active=1")
+        c.execute("SELECT u.telegram_id, u.username, p.plan_type, p.end_date, p.key_id, p.data_limit, p.accumulated_bytes FROM plans p JOIN users u ON p.telegram_id = u.telegram_id WHERE p.is_active=1")
         users_data = c.fetchall()
         conn.close()
         
@@ -646,11 +629,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e: return await query.edit_message_text(f"❌ Server Error: {e}", reply_markup=BACK_TO_ADMIN_MARKUP)
             
         msg = "👥 <b>Active Users List</b>\n\n"
-        for tid, uname, ptype, edate, kid, dlimit, acc_bytes, last_bytes in users_data:
+        for tid, uname, ptype, edate, kid, dlimit, acc_bytes in users_data:
             matched_key = next((k for k in all_keys if str(k.key_id) == str(kid)), None)
             final_url = f"{matched_key.access_url.split('#')[0]}#{matched_key.name or f'Key_{kid}'}" if matched_key else "Not Found"
             
-            used_gb = ((acc_bytes or 0) + (last_bytes or 0)) / 1e9
+            used_gb = (acc_bytes or 0) / 1e9
             
             if dlimit:
                 limit_gb = dlimit / 1e9
@@ -672,13 +655,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = "⚠️ <b>၃ ရက်အတွင်း သက်တမ်းကုန်မည့် Users များ</b>\n\n"
         for tid, uname, ptype, edate in exp_data: msg += f"👤 {get_mention(tid, uname)} (<code>{tid}</code>)\n📦 Plan: <code>{ptype}</code>\n⏳ Exp: <code>{edate}</code>\n---\n"
         await query.edit_message_text(text=msg, reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='HTML')
-
-    elif data == 'admin_change_api':
-        await query.edit_message_text("⚙️ **Outline API အသစ် ပြောင်းလဲရန်**\n\n`/setapi YOUR_API_URL YOUR_CERT_SHA256` ဟု ရိုက်ထည့်ပါ။", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
-
-    elif data == 'admin_broadcast':
-        context.user_data['state'] = 'waiting_for_broadcast'
-        await query.edit_message_text("📢 **အသိပေးစာ (Broadcast) ပေးပို့ရန်**\n\nပေးပို့လိုသော စာသားကို အောက်တွင် ရိုက်ထည့်ပါ။", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
 
     elif data == 'how_to_use':
         kb = [[InlineKeyboardButton("🤖 Android", callback_data='htu_android'), InlineKeyboardButton("🍎 Apple (iOS)", callback_data='htu_apple')], [InlineKeyboardButton("🔙 Menu သို့ပြန်သွားရန်", callback_data='back_to_main')]]
@@ -726,16 +702,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn = get_db()
         c = conn.cursor()
         
-        c.execute("SELECT plan_type, data_limit, start_date, end_date, accumulated_bytes, last_known_bytes, is_active, expired_at FROM plans WHERE telegram_id=%s AND is_active IN (0, 1)", (user_id,))
+        c.execute("SELECT plan_type, data_limit, start_date, end_date, accumulated_bytes, is_active, expired_at FROM plans WHERE telegram_id=%s AND is_active IN (0, 1)", (user_id,))
         user_plans = c.fetchall()
         conn.close()
         
         if not user_plans: return await query.edit_message_text("❌ လက်ရှိ Plan သို့မဟုတ် မှတ်တမ်း မရှိသေးပါ။", reply_markup=BACK_TO_MAIN_MARKUP)
 
         msg = "👤 **လက်ရှိ Plan နှင့် မှတ်တမ်းများ**\n\n"
-        for ptype, dlimit, sdate, edate, acc_bytes, last_bytes, is_active, exp_at in user_plans:
+        for ptype, dlimit, sdate, edate, acc_bytes, is_active, exp_at in user_plans:
             
-            used_gb = ((acc_bytes or 0) + (last_bytes or 0)) / 1e9
+            used_gb = (acc_bytes or 0) / 1e9
             disp_plan = next((details['display'] for key, details in plans_dict.items() if details['plan_type'] == ptype), ptype)
             
             if is_active == 1:
@@ -936,6 +912,31 @@ async def check_expired_keys(context: ContextTypes.DEFAULT_TYPE):
     conn.commit()
     conn.close()
 
+async def send_kamatera_traffic_report(context: ContextTypes.DEFAULT_TYPE):
+    KAMATERA_IP = "79.108.225.57" 
+    KAMATERA_PASS = "Showtee123!@#$"
+    
+    in_gb, out_gb = get_kamatera_traffic(KAMATERA_IP, KAMATERA_PASS)
+    
+    if in_gb is not None and out_gb is not None:
+        server_total_gb = in_gb + out_gb
+        kamatera_status_text = (
+            f"⏰ <b>12-Hour Kamatera Traffic Update</b>\n\n"
+            f"☁️ <b>Server Traffic:</b>\n"
+            f"⬇️ Inbound: <code>{in_gb:.2f} GB</code>\n"
+            f"⬆️ Outbound: <code>{out_gb:.2f} GB</code>\n"
+            f"📊 Total Network: <b>{server_total_gb:.2f} GB</b>\n\n"
+            f"⚠️ <i>(900 GB ရောက်ပါက Server အသစ်ပြောင်းရန် ပြင်ဆင်ပါ)</i>"
+        )
+    else:
+        kamatera_status_text = "⏰ <b>12-Hour Kamatera Traffic Update</b>\n\n☁️ Kamatera Server Data: ⚠️ <code>(SSH ချိတ်ဆက်၍မရပါ - Password စစ်ပါ)</code>"
+
+    for admin in ADMIN_IDS:
+        try:
+            await context.bot.send_message(chat_id=admin, text=kamatera_status_text, parse_mode='HTML')
+        except Exception as e:
+            pass
+
 async def send_daily_report(context: ContextTypes.DEFAULT_TYPE):
     for admin in ADMIN_IDS:
         try: await context.bot.send_message(chat_id=admin, text="✅ **Daily Status Report**\n\nBot is running perfectly. Have a great day!", parse_mode='Markdown')
@@ -953,14 +954,16 @@ async def post_init(application: Application):
 def main():
     keep_alive()
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
+    
     if app.job_queue:
         app.job_queue.run_repeating(check_expired_keys, interval=60, first=10)
+        app.job_queue.run_repeating(send_kamatera_traffic_report, interval=43200, first=30)
+        
         mmt_tz = timezone(timedelta(hours=6, minutes=30))
         app.job_queue.run_daily(send_daily_report, time=time(hour=8, minute=30, tzinfo=mmt_tz))
     
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("admin", admin_panel))
-    app.add_handler(CommandHandler("setapi", set_api_command))
     app.add_handler(CommandHandler("deluser", delete_user_command)) 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     
