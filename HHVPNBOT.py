@@ -257,6 +257,10 @@ def generate_vpn_key(telegram_id, plan_type, data_gb=None, months=None):
     
     client.rename_key(new_key.key_id, suffix)
     data_bytes = data_gb * 1e9 if data_gb else None
+    
+    if data_bytes:
+        try: client.add_data_limit(new_key.key_id, int(data_bytes))
+        except Exception as e: logging.error(f"Failed to set data limit on outline server: {e}")
 
     c.execute('''INSERT INTO plans (telegram_id, key_id, plan_type, data_limit, start_date, end_date, is_active, username) VALUES (%s, %s, %s, %s, %s, %s, 1, %s)''', (telegram_id, new_key.key_id, plan_type, data_bytes, db_start_date, db_end_date, raw_username))
     conn.close()
