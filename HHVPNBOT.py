@@ -15,6 +15,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotComm
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from outline_vpn.outline_vpn import OutlineVPN
 import requests
+import paramiko # <-- SSH ချိတ်ဆက်ရန်အတွက် အသစ်ထည့်ထားသည်
 
 try:
     import boto3
@@ -135,6 +136,30 @@ def init_db():
     conn.close()
 
 init_db()
+
+# 🌟 KAMATERA SSH TRAFFIC FUNCTION (အသစ်ထည့်ထားသည်) 🌟
+def get_kamatera_traffic(79.108.225.57, Showtee123!@#$):
+    try:
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(ip, port=22, username='root', password=password, timeout=5)
+        
+        cmd = "awk '/eth0|ens/{rx+=$2; tx+=$10} END{print rx\":\"tx}' /proc/net/dev"
+        stdin, stdout, stderr = client.exec_command(cmd)
+        result = stdout.read().decode().strip().split(':')
+        client.close()
+        
+        inbound_bytes = int(result[0])
+        outbound_bytes = int(result[1])
+        
+        inbound_gb = inbound_bytes / (1024**3)
+        outbound_gb = outbound_bytes / (1024**3)
+        
+        return inbound_gb, outbound_gb
+    except Exception as e:
+        logging.error(f"Kamatera SSH Error: {e}")
+        return None, None
+
 
 # 🌟 THE FINAL BULLETPROOF DATA LOGIC 🌟
 def calculate_and_sync_usage(all_keys):
@@ -542,14 +567,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             c.execute("SELECT value FROM settings WHERE key='total_server_gb'")
             row_gb = c.fetchone()
             total_server_gb = int(row_gb[0]) if row_gb else 2000
-            c.execute("SELECT value FROM settings WHERE key='aws_access_key'")
-            aws_ak = c.fetchone()
-            c.execute("SELECT value FROM settings WHERE key='aws_secret_key'")
-            aws_sk = c.fetchone()
-            c.execute("SELECT value FROM settings WHERE key='aws_region'")
-            aws_reg = c.fetchone()
-            c.execute("SELECT value FROM settings WHERE key='aws_instance_name'")
-            aws_iname = c.fetchone()
             
             c.execute("SELECT accumulated_bytes, last_known_bytes FROM plans WHERE is_active=1")
             all_active_usage = c.fetchall()
@@ -575,25 +592,34 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             danger_limit = total_server_gb * 0.9
             warning_limit = total_server_gb * 0.7
             srv_status = f"🔴 <b>DANGER:</b> Server အသစ် အမြန်ဝယ်ရန် လိုအပ်နေပါပြီ。" if total_used_gb >= danger_limit else (f"🟡 <b>WARNING:</b> မကြာမီ Server အသစ်ဝယ်ရန် ပြင်ဆင်ထားပါ။" if total_used_gb >= warning_limit else "🟢 <b>NORMAL:</b> Server အခြေအနေ ကောင်းမွန်ပါသေးသည်။")
-            aws_status_text = "☁️ AWS Data: `မချိတ်ရသေးပါ` (Menu တွင် ချိတ်ဆက်ပါ)"
-            if BOTO3_AVAILABLE and aws_ak and aws_sk and aws_reg and aws_iname:
-                try:
-                    boto_client = boto3.client('lightsail', region_name=aws_reg[0], aws_access_key_id=aws_ak[0], aws_secret_access_key=aws_sk[0])
-                    start_time = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
-                    response = boto_client.get_instance_metric_data(instanceName=aws_iname[0], metricName='NetworkOut', period=86400, startTime=start_time, endTime=now, unit='Bytes', statistics=['Sum'])
-                    aws_bytes = sum(dp.get('sum', 0) for dp in response.get('metricData', []))
-                    aws_gb = aws_bytes / (1024**3)
-                    aws_status_text = f"☁️ AWS အမှန်တကယ်ထွက်ရှိမှု (NetworkOut): <b>{aws_gb:.2f} GB</b>"
-                except Exception as e: aws_status_text = f"☁️ AWS Error: <code>{str(e)}</code>"
-            elif not BOTO3_AVAILABLE: aws_status_text = "☁️ AWS Data: ⚠️ <code>boto3</code> ကို requirements.txt တွင် ထည့်ပါ။"
+            
+            # 🌟 KAMATERA SSH SERVER TRAFFIC 🌟
+            KAMATERA_IP = "79.108.225.57" 
+            KAMATERA_PASS = "Showtee123!@#$"
+            
+            in_gb, out_gb = get_kamatera_traffic(KAMATERA_IP, KAMATERA_PASS)
+            
+            if in_gb is not None and out_gb is not None:
+                kamatera_status_text = (
+                    f"☁️ <b>Kamatera Server Traffic:</b>\n"
+                    f"⬇️ Inbound: <code>{in_gb:.2f} GB</code>\n"
+                    f"⬆️ Outbound: <code>{out_gb:.2f} GB</code>\n"
+                    f"📊 Total Network: <b>{(in_gb + out_gb):.2f} GB</b>"
+                )
+            else:
+                kamatera_status_text = "☁️ Kamatera Server Data: ⚠️ <code>(SSH ချိတ်ဆက်၍မရပါ - Password စစ်ပါ)</code>"
+
             msg = (
                 f"📊 <b>စီးပွားရေးနှင့် Server အခြေအနေ (Stats)</b>\n\n"
                 f"📅 <b>ယခုလစာရင်း ({now.strftime('%B')}):</b>\n▪️ လစဉ် အရင်း: <code>25,000 ကျပ်</code>\n▪️ ယခုလ ဝင်ငွေ: <code>{monthly_rev:,} ကျပ်</code>\n▪️ အခြေအနေ: {get_status(monthly_profit)} ကျပ်\n\n"
                 f"📆 <b>ယခုနှစ်စာရင်း (YTD):</b>\n▪️ နှစ်စဉ် အရင်း: <code>{25000 * current_m_num:,} ကျပ်</code>\n▪️ ယခုနှစ် ဝင်ငွေ: <code>{yearly_rev:,} ကျပ်</code>\n▪️ အခြေအနေ: {get_status(yearly_profit)} ကျပ်\n\n"
-                f"💽 <b>Server Data အခြေအနေ:</b>\n▪️ Active Keys: <code>{active_keys_count} ခု</code>\n▪️ ရောင်းချထားသော Data: <code>{total_allocated_gb:.2f} GB</code>\n▪️ တွက်ချက်ထားသော Data: <code>{total_used_gb:.2f} GB</code> / <b>{total_server_gb} GB</b>\n{aws_status_text}\n\n💡 <b>အကြံပြုချက်:</b>\n{srv_status}"
+                f"💽 <b>Server Data အခြေအနေ:</b>\n▪️ Active Keys: <code>{active_keys_count} ခု</code>\n▪️ ရောင်းချထားသော Data: <code>{total_allocated_gb:.2f} GB</code>\n▪️ Customer သုံးထားသော Data: <code>{total_used_gb:.2f} GB</code> / <b>{total_server_gb} GB</b>\n\n"
+                f"{kamatera_status_text}\n\n"
+                f"💡 <b>အကြံပြုချက်:</b>\n{srv_status}"
             )
             await query.edit_message_text(text=msg, reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='HTML')
-        except Exception as e: await query.edit_message_text(text=f"❌ Error: {e}", reply_markup=BACK_TO_ADMIN_MARKUP)
+        except Exception as e: 
+            await query.edit_message_text(text=f"❌ Error: {e}", reply_markup=BACK_TO_ADMIN_MARKUP)
 
     elif data == 'admin_edit_plans':
         kb = [[InlineKeyboardButton(p_info['short_name'], callback_data=f"editplan_{p_key}")] for p_key, p_info in plans_dict.items()]
