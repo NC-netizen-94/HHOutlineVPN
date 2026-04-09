@@ -138,7 +138,7 @@ def init_db():
 init_db()
 
 # 🌟 KAMATERA SSH TRAFFIC FUNCTION (အသစ်ထည့်ထားသည်) 🌟
-def get_kamatera_traffic(79.108.225.57, Showtee123!@#$):
+def get_kamatera_traffic(ip, password):
     try:
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
