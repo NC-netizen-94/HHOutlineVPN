@@ -736,7 +736,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['pending_plan'] = data
         context.user_data['action_type'] = 'buy'
         await safe_delete_message(query.message)
-        await context.bot.send_message(user_id, "💰 **ငွေပေးချေရန် အချက်အလက်များ**\n\nအောက်ပါ KPay သို့ ငွေလွှဲပါ။\n📝 **Note မှာ shopping လို့ရေးပေးပါ**\n\n👤 Name: `Nyein Chan`\n\n📸 **ငွေလွှဲပြေစာ (Screenshot)** ကို ပို့ပေးပါ။", parse_mode='Markdown')
+        await context.bot.send_message(user_id, "💰 **ငွေပေးချေရန် အချက်အလက်များ**\n\nအောက်ပါ KPay သို့ ငွေလွှဲပါ။\n📝 **Note မှာ shopping လို့ရေးပေးပါ**\n\n👤 Name: `U Aung Pyae`\n\n📸 **ငွေလွှဲပြေစာ (Screenshot)** ကို ပို့ပေးပါ။", parse_mode='Markdown')
         await context.bot.send_message(user_id, "`09952130817`", parse_mode='Markdown')
         if os.path.exists(PAYMENT_QR_PATH):
             with open(PAYMENT_QR_PATH, 'rb') as f: await context.bot.send_photo(user_id, f, reply_markup=BACK_TO_MAIN_MARKUP)
