@@ -103,8 +103,8 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''')
     upsert_query = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
     
-    NEW_API_URL = 'https://79.108.225.57:15007/lmaknRpnP3iUhi63azTSHw'
-    NEW_CERT = 'C3DE1FD3FD8AA147B9B3CAA2EADDC55D3EF829089C709D27CBF1158FA32B5228'
+    NEW_API_URL = 'https://79.108.225.57:20433/NfIsVh7WjfzcXgAy5arU0Q'
+    NEW_CERT = '4B07FF08AD7B31F5C5BBC78EE266A7C554EEBC4C088FC4AD9D23A91C6AE86777'
 
     c.execute(upsert_query, ('outline_api_url', NEW_API_URL))
     c.execute(upsert_query, ('outline_cert_sha256', NEW_CERT))
