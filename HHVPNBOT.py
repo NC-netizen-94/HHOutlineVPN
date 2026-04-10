@@ -244,8 +244,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except ValueError: pass
     get_or_create_user(user.id, username, referred_by)
     
+    # 🌟 Free Trial button ပိတ်ထားသည်
     keyboard = [
-        [InlineKeyboardButton("🎁 Free 3GB အစမ်းသုံးရန်", callback_data='free_trial')],
         [InlineKeyboardButton("🛒 Plan ဝယ်ရန်", callback_data='buy_plan')],
         [InlineKeyboardButton("👤 Plan/Data စစ်ရန်", callback_data='my_plan'), InlineKeyboardButton("❓ အသုံးပြုပုံ", callback_data='how_to_use')],
         [InlineKeyboardButton("📢 သူငယ်ချင်းများသို့ မျှဝေရန်", callback_data='share_referral')],
@@ -600,7 +600,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = f"✏️ ရွေးချယ်ထားသော Plan: `{plans_dict.get(plan_key, {}).get('short_name', plan_key)}`\n\n**Plan အမည်သစ်ကို | ခံ၍ ရိုက်ထည့်ပါ။**\n`Short Name | Display Name`"
         await query.edit_message_text(msg, reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
 
-    # 🌟 UPDATED ADMIN VIEW USERS (WITH INDIVIDUAL DELETE BUTTONS) 🌟
     elif data == 'admin_view_users':
         await query.edit_message_text("⏳ Data များကို Outline Server မှ တိုက်ရိုက်ဆွဲယူနေပါသည်...")
         conn = get_db()
@@ -665,23 +664,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try: await context.bot.send_message(admin, f"🌟 <b>New Rating!</b>\n\n👤 User: {get_mention(user_id, username)}\n⭐️ Rating: <b>{rating} Stars</b>", parse_mode='HTML')
             except: pass
 
+    # 🌟 Free Trial callback ကို ပိတ်ထားသည်
     elif data == 'free_trial':
-        conn = get_db()
-        c = conn.cursor()
-        c.execute("SELECT is_trial_used FROM users WHERE telegram_id=%s", (user_id,))
-        is_used = c.fetchone()[0]
-        if is_used == 1: await query.edit_message_text("⚠️ Free Trial ကို အသုံးပြုပြီးဖြစ်ပါသည်။ Plan ဝယ်ယူရန်အတွက် Menuသို့ပြန်သွားပါ", reply_markup=BACK_TO_MAIN_MARKUP)
-        else:
-            await query.edit_message_text("⏳ Free Trial Key ကို ဖန်တီးနေပါသည်...")
-            try:
-                url, name = generate_vpn_key(user_id, "FreeTrial", data_gb=3)
-                c.execute("UPDATE users SET is_trial_used=1 WHERE telegram_id=%s", (user_id,))
-                await safe_delete_message(query.message)
-                await context.bot.send_message(user_id, f"✅ **Free Trial 3GB ရရှိပါပြီ©**\n⏱ **(၅) ရက်တိတိ အသုံးပြုနိုင်ပါသည်။**\n\n👤 **Name:** `{name}`\n\n👇 **အောက်ပါ Key ကို Copy ကူးပြီး Outline VPN တွင် ထည့်သွင်းအသုံးပြုနိုင်ပါပြီ©**", parse_mode='Markdown')
-                await context.bot.send_message(user_id, f"`{url}`", parse_mode='Markdown')
-                await context.bot.send_message(user_id, PROMO_MSG, reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
-            except Exception as e: await query.edit_message_text(f"❌ Error: {e}")
-        conn.close()
+        await query.edit_message_text("⚠️ ယခုအချိန်တွင် Free Trial ဝန်ဆောင်မှုကို ခေတ္တပိတ်ထားပါသည်©", reply_markup=BACK_TO_MAIN_MARKUP)
 
     elif data == 'buy_plan':
         context.user_data['action_type'] = 'buy'
