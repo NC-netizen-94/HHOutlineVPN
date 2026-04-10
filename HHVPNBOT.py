@@ -41,6 +41,7 @@ def keep_alive():
     t = Thread(target=run_web)
     t.start()
 
+# --- CONFIGURATION ---
 BOT_TOKEN = "8633829411:AAEdkGteDuDt4fjJABAIR7jIMLVIPQ1PPhA"
 BOT_USERNAME = "HHVPN_bot" 
 ADMIN_IDS = [1656832105] 
@@ -53,7 +54,7 @@ APPLE_SS_PATH = "apple_ss.jpg"
 PAYMENT_QR_PATH = "kpay_qr.jpg"     
 
 PROMO_MSG = "🎁 သတင်းကောင်း!\nTelegram ကနေ သူငယ်ချင်းကို Invite လုပ်ရင် 1GB Free ရမယ်နော်။\n\n👉 အသေးစိတ်ကို Admin ( https://t.me/HappyHive9496 ) ထံ ဆက်သွယ်မေးမြန်းနိုင်ပါတယ်။"
-WELCOME_TEXT = ("🌟 **Welcome to HappyHive VPN!** 🌟\n\n🚀 **ဘာလို့ HappyHive ကို ရွေးချယ်သင့်တာလဲ?**\n🛡️ **Private & Secure:** လူထောင်ချီသုံးနေတဲ့ အခမဲ့ VPN တွေလို မဟုတ်ဘဲ၊ သီးသန့် Private Server ကို အသုံးပြုထားလို့ လိုင်းကျတာ၊ ချိတ်မရတာ လုံးဝမရှိပါဘူး。\n⚡️ **High Speed:** ကမ္ဘာ့အကောင်းဆုံး AWS Server များဖြစ်လို့ ရုပ်ရှင်ကြည့်၊ ဂိမ်းဆော့၊ ဒေါင်းလုဒ်ဆွဲ... အထစ်အငေါ့မရှိ အမြန်နှုန်း အပြည့်ရပါမယ်。\n🔒 **100% Safe:** လူကြီးမင်း၏ ကိုယ်ရေးအချက်အလက်များကို လုံးဝ မှတ်သားထားခြင်း (No Logs) မရှိလို့ ယုံကြည်စိတ်ချစွာ အသုံးပြုနိုင်ပါတယ်။\n\n👇 အောက်ပါ Menu များမှတဆင့် မိမိအသုံးပြုလိုသော ဝန်ဆောင်မှုကို ရွေးချယ်ပါ ခင်ဗျာ。")
+WELCOME_TEXT = ("🌟 **Welcome to HappyHive VPN!** 🌟\n\n🚀 **ဘာလို့ HappyHive ကို ရွေးချယ်သင့်တာလဲ?**\n🛡️ **Private & Secure:** လူထောင်ချီသုံးနေတဲ့ အခမဲ့ VPN တွေလို မဟုတ်ဘဲ၊ သီးသန့် Private Server ကို အသုံးပြုထားလို့ လိုင်းကျတာ၊ ချိတ်မရတာ လုံးဝမရှိပါဘူး。\n⚡️ **High Speed:** ကမ္ဘာ့အကောင်းဆုံး AWS Server များဖြစ်လို့ ရုပ်ရှင်ကြည့်၊ ဂိမ်းဆော့၊ ဒေါင်းလုဒ်ဆွဲ... အထစ်အငေါ့မရှိ အမြန်နှုန်း အပြည့်ရပါမယ်。\n🔒 **100% Safe:** လူကြီးမင်း၏ ကိုယ်ရေးအချက်အလက်များကို လုံးဝ မှတ်သားထားခြင်း (No Logs) မရှိလို့ ယုံကြည်စိတ်ချစွာ အသုံးပြုနိုင်ပါတယ်။\n\n👇 အောက်ပါ Menu များမှတဆင့် မိမိအသုံးပြုလိုသော ဝန်ဆောင်မှုကို ရွေးချယ်ပါ ခင်ဗျာ©")
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -69,7 +70,7 @@ async def safe_delete_message(message):
 
 async def send_auto_backup(context: ContextTypes.DEFAULT_TYPE, target_id: int, target_uname: str, action_text: str):
     try:
-        caption = f"☁️ <b>Cloud Sync Successful</b>\n{get_mention(target_id, target_uname)} သို့ {action_text}ပြီးနောက် အချက်အလက်များကို လုံခြုံစွာ Cloud တွင် သိမ်းဆည်းလိုက်ပါပြီ。"
+        caption = f"☁️ <b>Cloud Sync Successful</b>\n{get_mention(target_id, target_uname)} သို့ {action_text}ပြီးနောက် အချက်အလက်များကို လုံခြုံစွာ Cloud တွင် သိမ်းဆည်းလိုက်ပါပြီ।"
         for admin in ADMIN_IDS:
             try: await context.bot.send_message(admin, text=caption, parse_mode='HTML')
             except: pass
@@ -125,7 +126,6 @@ def init_db():
 
 init_db()
 
-# 🌟 KAMATERA SSH TRAFFIC FUNCTION 🌟
 def get_kamatera_traffic(ip, password):
     try:
         client = paramiko.SSHClient()
@@ -148,19 +148,15 @@ def get_kamatera_traffic(ip, password):
         logging.error(f"Kamatera SSH Error: {e}")
         return None, None
 
-
-# 🌟 THE SIMPLEST DATA SYNC LOGIC (Direct Copy from Server) 🌟
 def calculate_and_sync_usage(all_keys):
     conn = get_db()
     c = conn.cursor()
-
     usage_dict = {}
     for k in all_keys:
         kid = str(k.key_id)
         curr_b = int(getattr(k, 'used_bytes', 0) or 0)
         c.execute("UPDATE plans SET current_used_bytes=%s WHERE key_id=%s AND is_active=1", (curr_b, kid))
         usage_dict[kid] = curr_b
-
     conn.commit()
     conn.close()
     return usage_dict
@@ -305,13 +301,13 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try: await context.bot.send_message(chat_id=admin, text=f"💌 <b>New Anonymous Feedback</b> 💌\n\n💬 Message:\n{html.escape(text)}", parse_mode='HTML')
             except: pass
         del context.user_data['state']
-        await update.message.reply_text("✅ ကျေးဇူးတင်ပါသည်။ လူကြီးမင်း၏ အကြံပြုစာကို Admin ထံသို့ လျှို့ဝှက်ပေးပို့ပြီးပါပြီ。", reply_markup=BACK_TO_MAIN_MARKUP)
+        await update.message.reply_text("✅ ကျေးဇူးတင်ပါသည်။ လူကြီးမင်း၏ အကြံပြုစာကို Admin ထံသို့ လျှို့ဝှက်ပေးပို့ပြီးပါပြီ©", reply_markup=BACK_TO_MAIN_MARKUP)
 
     elif state == 'waiting_for_manual_key' and update.effective_user.id in ADMIN_IDS:
         if "|" not in text or len(text.split("|")) != 3: return await update.message.reply_text("❌ Format မှားယွင်းနေပါသည်။ `ID | Name | Plan` ပုံစံဖြင့် ရိုက်ထည့်ပါ။", parse_mode='Markdown')
         tid_str, uname, pkey = map(str.strip, text.split('|', 2))
         try: target_id = int(tid_str)
-        except ValueError: return await update.message.reply_text("❌ Telegram ID (သို့) ဖုန်းနံပါတ်သည် ဂဏန်းသက်သက်သာ ဖြစ်ရပါမည်。")
+        except ValueError: return await update.message.reply_text("❌ Telegram ID (သို့) ဖုန်းနံပါတ်သည် ဂဏန်းသက်သက်သာ ဖြစ်ရပါမည်©")
         plan_info = get_plan_details().get(pkey)
         if not plan_info: return await update.message.reply_text("❌ Plan အမည် မှားယွင်းနေပါသည်။", parse_mode='Markdown')
         del context.user_data['state']
@@ -319,9 +315,9 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         get_or_create_user(target_id, uname)
         try:
             access_url, key_name = generate_vpn_key(target_id, plan_info['plan_type'], plan_info['data_gb'], plan_info['months'])
-            await update.message.reply_text(f"✅ **Manual Key အောင်မြင်စွာ ထုတ်ပေးလိုက်ပါပြီ。**\n\n👤 Name: `{key_name}`\n🔑 Access Key:\n`{access_url}`", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
+            await update.message.reply_text(f"✅ **Manual Key အောင်မြင်စွာ ထုတ်ပေးလိုက်ပါပြီ©**\n\n👤 Name: `{key_name}`\n🔑 Access Key:\n`{access_url}`", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
             try:
-                await context.bot.send_message(chat_id=target_id, text=f"🎉 **Admin မှ လူကြီးမင်း၏ VPN Plan ကို အတည်ပြုပေးလိုက်ပါပြီ。**\n\n👤 **Name:** `{key_name}`\n\n👇 **အောက်ပါ Key ကို Copy ကူးပြီး Outline VPN တွင် ထည့်သွင်းအသုံးပြုနိုင်ပါပြီ。**", parse_mode='Markdown')
+                await context.bot.send_message(chat_id=target_id, text=f"🎉 **Admin မှ လူကြီးမင်း၏ VPN Plan ကို အတည်ပြုပေးလိုက်ပါပြီ©**\n\n👤 **Name:** `{key_name}`\n\n👇 **အောက်ပါ Key ကို Copy ကူးပြီး Outline VPN တွင် ထည့်သွင်းအသုံးပြုနိုင်ပါပြီ©**", parse_mode='Markdown')
                 await context.bot.send_message(chat_id=target_id, text=f"`{access_url}`", parse_mode='Markdown')
             except: pass
             await send_auto_backup(context, target_id, uname, "Plan (Manual) ချပေး")
@@ -336,7 +332,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             c.execute(upsert_gb, (str(new_gb),))
             conn.close()
             del context.user_data['state']
-            await update.message.reply_text(f"✅ Server ၏ Storage ကို **{new_gb} GB** အဖြစ် အောင်မြင်စွာ ပြောင်းလဲသတ်မှတ်လိုက်ပါပြီ。", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
+            await update.message.reply_text(f"✅ Server ၏ Storage ကို **{new_gb} GB** အဖြစ် အောင်မြင်စွာ ပြောင်းလဲသတ်မှတ်လိုက်ပါပြီ©", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
         except ValueError: await update.message.reply_text("❌ ကျေးဇူးပြု၍ Storage ပမာဏကို ဂဏန်းသက်သက်သာ ရိုက်ထည့်ပါ။ (ဥပမာ - 1000, 2000)", parse_mode='Markdown')
 
     elif state == 'waiting_for_aws_setup' and update.effective_user.id in ADMIN_IDS:
@@ -352,7 +348,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         c.execute(aws_q, ('aws_instance_name', iname))
         conn.close()
         del context.user_data['state']
-        await update.message.reply_text("✅ AWS အချက်အလက်များ အောင်မြင်စွာ မှတ်သားပြီးပါပြီ。", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
+        await update.message.reply_text("✅ AWS အချက်အလက်များ အောင်မြင်စွာ မှတ်သားပြီးပါပြီ©", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
 
     elif state and state.startswith('waiting_for_plan_name_') and update.effective_user.id in ADMIN_IDS:
         plan_key = state.replace('waiting_for_plan_name_', '')
@@ -363,7 +359,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         c.execute("UPDATE plan_configs SET short_name=%s, display_name=%s WHERE plan_key=%s", (short_name, display_name, plan_key))
         conn.close()
         del context.user_data['state']
-        await update.message.reply_text(f"✅ Plan အမည်ကို အောင်မြင်စွာ ပြောင်းလဲလိုက်ပါပြီ。\n\n🔹 **Short:** `{short_name}`\n🔹 **Display:** `{display_name}`", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
+        await update.message.reply_text(f"✅ Plan အမည်ကို အောင်မြင်စွာ ပြောင်းလဲလိုက်ပါပြီ©\n\n🔹 **Short:** `{short_name}`\n🔹 **Display:** `{display_name}`", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
 
     elif state == 'waiting_for_broadcast' and update.effective_user.id in ADMIN_IDS:
         await update.message.reply_text("⏳ Broadcast စတင်ပေးပို့နေပါသည်... ခဏစောင့်ပါ။")
@@ -380,13 +376,13 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await asyncio.sleep(0.05) 
             except: failed += 1
         del context.user_data['state']
-        await context.bot.send_message(chat_id=update.effective_user.id, text=f"✅ **Broadcast ပေးပို့ခြင်း ပြီးဆုံးပါပြီ。**\n\n🟢 အောင်မြင်: `{success}` ဦး\n🔴 မအောင်မြင်: `{failed}` ဦး", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
+        await context.bot.send_message(chat_id=update.effective_user.id, text=f"✅ **Broadcast ပေးပို့ခြင်း ပြီးဆုံးပါပြီ©**\n\n🟢 အောင်မြင်: `{success}` ဦး\n🔴 မအောင်မြင်: `{failed}` ဦး", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
 
 async def delete_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS: return
     if len(context.args) != 1: return await update.message.reply_text("❌ အသုံးပြုပုံ မှားယွင်းနေပါသည်။\nဥပမာ - `/deluser 123456789`", parse_mode='Markdown')
     try: target_id = int(context.args[0])
-    except ValueError: return await update.message.reply_text("❌ User ID သည် ဂဏန်းသာ ဖြစ်ရပါမည်。")
+    except ValueError: return await update.message.reply_text("❌ User ID သည် ဂဏန်းသာ ဖြစ်ရပါမည်©")
     conn = get_db()
     c = conn.cursor()
     c.execute("SELECT key_id FROM plans WHERE telegram_id=%s", (target_id,))
@@ -403,14 +399,14 @@ async def delete_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     c.execute("DELETE FROM users WHERE telegram_id=%s", (target_id,))
     deleted_users = c.rowcount
     conn.close()
-    if deleted_plans > 0 or deleted_users > 0: await update.message.reply_text(f"✅ User ID `{target_id}` အား ဖျက်ပစ်လိုက်ပါပြီ。", parse_mode='Markdown')
+    if deleted_plans > 0 or deleted_users > 0: await update.message.reply_text(f"✅ User ID `{target_id}` အား ဖျက်ပစ်လိုက်ပါပြီ©", parse_mode='Markdown')
     else: await update.message.reply_text(f"⚠️ User ID `{target_id}` ကို မတွေ့ပါ။", parse_mode='Markdown')
 
 async def send_rating_request(context: ContextTypes.DEFAULT_TYPE):
     user_id = context.job.data
     kb = [[InlineKeyboardButton("⭐", callback_data='rate_1'), InlineKeyboardButton("⭐⭐", callback_data='rate_2'), InlineKeyboardButton("⭐⭐⭐", callback_data='rate_3')],
           [InlineKeyboardButton("⭐⭐⭐⭐", callback_data='rate_4'), InlineKeyboardButton("⭐⭐⭐⭐⭐", callback_data='rate_5')]]
-    try: await context.bot.send_message(chat_id=user_id, text="🌟 **HappyHive VPN ကို အသုံးပြုရတာ အဆင်ပြေရဲ့လား ခင်ဗျာ?**\n\nလူကြီးမင်း၏ အတွေ့အကြုံကို အောက်ပါ ကြယ်လေးတွေနှိပ်ပြီး အမှတ်ပေး အကဲဖြတ်ပေးပါဦး ခင်ဗျာ。", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
+    try: await context.bot.send_message(chat_id=user_id, text="🌟 **HappyHive VPN ကို အသုံးပြုရတာ အဆင်ပြေရဲ့လား ခင်ဗျာ?**\n\nလူကြီးမင်း၏ အတွေ့အကြုံကို အောက်ပါ ကြယ်လေးတွေနှိပ်ပြီး အမှတ်ပေး အကဲဖြတ်ပေးပါဦး ခင်ဗျာ©", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
     except: pass
 
 async def send_htu_guide(query, context, os_type):
@@ -441,6 +437,24 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop('state', None)
         await safe_delete_message(query.message)
         return await start(update, context)
+    
+    # 🌟 NEW: INDIVIDUAL KEY DELETION HANDLER 🌟
+    elif data.startswith('adm_delkey_'):
+        key_id_to_del = data.replace('adm_delkey_', '')
+        await query.edit_message_text(f"⏳ Key ID: {key_id_to_del} ကို ဖျက်နေပါသည်...")
+        try:
+            client = get_outline_client()
+            try: client.delete_key(key_id_to_del)
+            except: pass
+            conn = get_db()
+            c = conn.cursor()
+            c.execute("DELETE FROM plans WHERE key_id = %s", (key_id_to_del,))
+            conn.commit()
+            conn.close()
+            await query.edit_message_text(f"✅ Key ID: {key_id_to_del} ကို အောင်မြင်စွာ ဖျက်လိုက်ပါပြီ©", reply_markup=BACK_TO_ADMIN_MARKUP)
+        except Exception as e:
+            await query.edit_message_text(f"❌ Error: {e}", reply_markup=BACK_TO_ADMIN_MARKUP)
+
     elif data == 'admin_aws_setup':
         context.user_data['state'] = 'waiting_for_aws_setup'
         msg = ("☁️ **AWS ချိတ်ဆက်ရန်**\n\nAWS IAM မှ ရရှိသော အချက်အလက်များကို `|` ခံ၍ အောက်ပါအတိုင်း ရိုက်ထည့်ပါ။\n`AccessKey | SecretKey | Region | InstanceName`\n\n📌 ဥပမာ - `AKIA... | wJalrX... | ap-southeast-1 | HHVPN-Server`")
@@ -463,7 +477,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 caption = f"📦 <b>Cloud Database Backup</b>\n📅 <code>{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</code>\n\n✅ Neon Cloud မှ Data အားလုံးကို JSON ဖိုင်အဖြစ် ထုတ်ယူထားခြင်း ဖြစ်ပါသည်။"
                 await context.bot.send_document(chat_id=user_id, document=f, caption=caption, parse_mode='HTML')
             os.remove(filename)
-            await query.edit_message_text("✅ **Cloud Backup အား လူကြီးမင်းထံသို့ အောင်မြင်စွာ ပေးပို့လိုက်ပါပြီ。**", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
+            await query.edit_message_text("✅ **Cloud Backup အား လူကြီးမင်းထံသို့ အောင်မြင်စွာ ပေးပို့လိုက်ပါပြီ©**", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
         except Exception as e: await query.edit_message_text(f"❌ Error ဖြစ်နေပါသည်: {e}", reply_markup=BACK_TO_ADMIN_MARKUP)
 
     elif data == 'share_referral':
@@ -503,7 +517,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     except: pass
             c.execute("TRUNCATE TABLE plans, users RESTART IDENTITY CASCADE")
             conn.close()
-            await query.edit_message_text("✅ **စနစ်တစ်ခုလုံးကို အောင်မြင်စွာ Reset ချလိုက်ပါပြီ。**", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
+            await query.edit_message_text("✅ **စနစ်တစ်ခုလုံးကို အောင်မြင်စွာ Reset ချလိုက်ပါပြီ©**", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
         except Exception as e: await query.edit_message_text(f"❌ Error ဖြစ်နေပါသည်: {e}", reply_markup=BACK_TO_ADMIN_MARKUP)
 
     elif data == 'admin_manual_key':
@@ -530,7 +544,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             conn.close()
             
             total_used_gb = sum((r[0] or 0) for r in all_active_usage) / 1e9
-
             PLAN_PRICES = {'30GB': 2000, '50GB': 3000, '100GB': 4000}
             now = datetime.now(timezone.utc)
             current_m, current_y, current_m_num = now.strftime("%Y-%m"), now.strftime("%Y"), now.month
@@ -548,11 +561,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             total_allocated_gb = sum(d[0]/1e9 for d in active_plans if d[0])
             danger_limit = total_server_gb * 0.9
             warning_limit = total_server_gb * 0.7
-            srv_status = f"🔴 <b>DANGER:</b> Server အသစ် အမြန်ဝယ်ရန် လိုအပ်နေပါပြီ。" if total_used_gb >= danger_limit else (f"🟡 <b>WARNING:</b> မကြာမီ Server အသစ်ဝယ်ရန် ပြင်ဆင်ထားပါ။" if total_used_gb >= warning_limit else "🟢 <b>NORMAL:</b> Server အခြေအနေ ကောင်းမွန်ပါသေးသည်။")
+            srv_status = f"🔴 <b>DANGER:</b> Server အသစ် အမြန်ဝယ်ရန် လိုအပ်နေပါပြီ©" if total_used_gb >= danger_limit else (f"🟡 <b>WARNING:</b> မကြာမီ Server အသစ်ဝယ်ရန် ပြင်ဆင်ထားပါ။" if total_used_gb >= warning_limit else "🟢 <b>NORMAL:</b> Server အခြေအနေ ကောင်းမွန်ပါသေးသည်။")
             
             KAMATERA_IP = "79.108.225.57" 
             KAMATERA_PASS = "Showtee123!@#$"
-            
             in_gb, out_gb = get_kamatera_traffic(KAMATERA_IP, KAMATERA_PASS)
             
             if in_gb is not None and out_gb is not None:
@@ -588,7 +600,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = f"✏️ ရွေးချယ်ထားသော Plan: `{plans_dict.get(plan_key, {}).get('short_name', plan_key)}`\n\n**Plan အမည်သစ်ကို | ခံ၍ ရိုက်ထည့်ပါ။**\n`Short Name | Display Name`"
         await query.edit_message_text(msg, reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
 
-    # 🌟 ADMIN VIEW USERS (DIRECT SERVER FETCH) 🌟
+    # 🌟 UPDATED ADMIN VIEW USERS (WITH INDIVIDUAL DELETE BUTTONS) 🌟
     elif data == 'admin_view_users':
         await query.edit_message_text("⏳ Data များကို Outline Server မှ တိုက်ရိုက်ဆွဲယူနေပါသည်...")
         conn = get_db()
@@ -605,22 +617,23 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await query.edit_message_text(f"❌ Server Error: {e}", reply_markup=BACK_TO_ADMIN_MARKUP)
             
         msg = "👥 <b>Active Users List (Real-time)</b>\n\n"
+        kb_keys = []
         for tid, uname, ptype, edate, kid, dlimit, current_bytes in users_data:
             matched_key = next((k for k in all_keys if str(k.key_id) == str(kid)), None)
-            final_url = f"{matched_key.access_url.split('#')[0]}#{matched_key.name or f'Key_{kid}'}" if matched_key else "Not Found"
-            
-            # Use Direct Outline Server Data if available, else fallback to DB
             real_used_bytes = int(getattr(matched_key, 'used_bytes', 0) or 0) if matched_key else current_bytes
             used_gb = real_used_bytes / 1e9
             
             if dlimit:
                 limit_gb = dlimit / 1e9
-                rem_gb = max(0, limit_gb - used_gb)
-                data_info = f"📊 Data: <code>{used_gb:.2f}GB / {limit_gb:.2f}GB</code> (လက်ကျန်: <code>{rem_gb:.2f}GB</code>)"
-            else: data_info = f"📊 သုံးထားသော Data: <code>{used_gb:.2f}GB</code> (အကန့်အသတ်မရှိ)"
-            msg += f"👤 {get_mention(tid, uname)} (<code>{tid}</code>)\n📦 Plan: <code>{ptype}</code>\n⏳ Exp: <code>{edate or 'No Expiry'}</code>\n{data_info}\n🔑 Key: <code>{final_url}</code>\n---\n"
+                data_info = f"📊 Data: <code>{used_gb:.2f}GB / {limit_gb:.2f}GB</code>"
+            else: data_info = f"📊 သုံးထားသော Data: <code>{used_gb:.2f}GB</code>"
+            
+            msg += f"👤 {get_mention(tid, uname)} (ID: <code>{tid}</code>)\n📦 Plan: <code>{ptype}</code>\n⏳ Exp: <code>{edate or 'No Exp'}</code>\n{data_info}\n---\n"
+            kb_keys.append([InlineKeyboardButton(f"🗑 Delete Key: {kid} ({ptype})", callback_data=f"adm_delkey_{kid}")])
+        
+        kb_keys.append([InlineKeyboardButton("🔙 Admin Panel သို့ ပြန်သွားရန်", callback_data='back_to_admin')])
         if len(msg) > 4000: msg = msg[:4000] + "\n... (စာရင်းများလွန်းသဖြင့် အချို့ကို ဖြတ်ထားပါသည်)"
-        await query.edit_message_text(text=msg, reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='HTML')
+        await query.edit_message_text(text=msg, reply_markup=InlineKeyboardMarkup(kb_keys), parse_mode='HTML')
 
     elif data == 'admin_expiring':
         conn = get_db()
@@ -664,7 +677,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 url, name = generate_vpn_key(user_id, "FreeTrial", data_gb=3)
                 c.execute("UPDATE users SET is_trial_used=1 WHERE telegram_id=%s", (user_id,))
                 await safe_delete_message(query.message)
-                await context.bot.send_message(user_id, f"✅ **Free Trial 3GB ရရှိပါပြီ。**\n⏱ **(၅) ရက်တိတိ အသုံးပြုနိုင်ပါသည်။**\n\n👤 **Name:** `{name}`\n\n👇 **အောက်ပါ Key ကို Copy ကူးပြီး Outline VPN တွင် ထည့်သွင်းအသုံးပြုနိုင်ပါပြီ。**", parse_mode='Markdown')
+                await context.bot.send_message(user_id, f"✅ **Free Trial 3GB ရရှိပါပြီ©**\n⏱ **(၅) ရက်တိတိ အသုံးပြုနိုင်ပါသည်။**\n\n👤 **Name:** `{name}`\n\n👇 **အောက်ပါ Key ကို Copy ကူးပြီး Outline VPN တွင် ထည့်သွင်းအသုံးပြုနိုင်ပါပြီ©**", parse_mode='Markdown')
                 await context.bot.send_message(user_id, f"`{url}`", parse_mode='Markdown')
                 await context.bot.send_message(user_id, PROMO_MSG, reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
             except Exception as e: await query.edit_message_text(f"❌ Error: {e}")
@@ -675,18 +688,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = "🛒 **ဝယ်ယူလိုသော Plan ကို ရွေးချယ်ပါ:**\n\n✅ **100% Full Speed:** ဝယ်ယူထားသော Data မကုန်မချင်း အမြန်နှုန်း အပြည့်ဖြင့် အသုံးပြုနိုင်ပါသည်။"
         await query.edit_message_text(text=msg, reply_markup=get_plans_keyboard(plans_dict), parse_mode='Markdown')
         
-    # 🌟 USER PLAN/DATA (DIRECT SERVER FETCH) 🌟
     elif data == 'my_plan':
         await query.edit_message_text("⏳ အချက်အလက်များကို Outline Server မှ တိုက်ရိုက်ရှာဖွေနေပါသည်...")
         conn = get_db()
         c = conn.cursor()
-        
         c.execute("SELECT plan_type, data_limit, start_date, end_date, current_used_bytes, is_active, expired_at, key_id FROM plans WHERE telegram_id=%s AND is_active IN (0, 1)", (user_id,))
         user_plans = c.fetchall()
         conn.close()
         
         if not user_plans: return await query.edit_message_text("❌ လက်ရှိ Plan သို့မဟုတ် မှတ်တမ်း မရှိသေးပါ။", reply_markup=BACK_TO_MAIN_MARKUP)
-
         try:
             client = get_outline_client()
             all_keys = client.get_keys()
@@ -695,37 +705,25 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         msg = "👤 **လက်ရှိ Plan နှင့် မှတ်တမ်းများ**\n\n"
         for ptype, dlimit, sdate, edate, current_bytes, is_active, exp_at, kid in user_plans:
-            
-            # Fetch directly from Outline Key Object if active
             real_used_bytes = 0
             if is_active == 1:
                 matched_key = next((k for k in all_keys if str(k.key_id) == str(kid)), None)
-                if matched_key:
-                    real_used_bytes = int(getattr(matched_key, 'used_bytes', 0) or 0)
-                else:
-                    real_used_bytes = current_bytes # Backup fallback
-            else:
-                real_used_bytes = current_bytes # If expired, show DB history
+                real_used_bytes = int(getattr(matched_key, 'used_bytes', 0) or 0) if matched_key else current_bytes
+            else: real_used_bytes = current_bytes
 
             used_gb = real_used_bytes / 1e9
             disp_plan = next((details['display'] for key, details in plans_dict.items() if details['plan_type'] == ptype), ptype)
             
-            if is_active == 1:
-                status_text = "🟢 **Active (အသုံးပြုနေဆဲ)**"
+            if is_active == 1: status_text = "🟢 **Active (အသုံးပြုနေဆဲ)**"
             else:
-                if dlimit and used_gb >= (dlimit / 1e9) * 0.99: 
-                    status_text = f"🔴 **Expired (Data ပြည့်သွားပါပြီ - {used_gb:.2f}GB / {dlimit/1e9:.0f}GB)**"
-                else:
-                    status_text = "🔴 **Expired (သက်တမ်း ကုန်သွားပါပြီ)**" 
+                if dlimit and used_gb >= (dlimit / 1e9) * 0.99: status_text = f"🔴 **Expired (Data ပြည့်သွားပါပြီ - {used_gb:.2f}GB / {dlimit/1e9:.0f}GB)**"
+                else: status_text = "🔴 **Expired (သက်တမ်း ကုန်သွားပါပြီ)**" 
             
-            msg += f"🔹 **Plan:** `{disp_plan}`\n"
-            msg += f"📌 **Status:** {status_text}\n"
-            msg += f"📅 **စဝယ်သည့်ရက်:** `{sdate[:10]}`\n"
+            msg += f"🔹 **Plan:** `{disp_plan}`\n📌 **Status:** {status_text}\n📅 **စဝယ်သည့်ရက်:** `{sdate[:10]}`\n"
             if edate: msg += f"⏳ **ကုန်ဆုံးရက်:** `{edate[:10]}`\n"
             if dlimit: msg += f"📊 **သတ်မှတ် Data:** `{dlimit/1e9:.2f} GB`\n"
             msg += f"📈 **အသုံးပြုပီး Data:** `{used_gb:.2f} GB`\n"
-            if is_active == 0 and exp_at:
-                msg += f"🛑 **ရပ်စဲသည့်အချိန်:** `{exp_at}`\n"
+            if is_active == 0 and exp_at: msg += f"🛑 **ရပ်စဲသည့်အချိန်:** `{exp_at}`\n"
             msg += "---\n"
             
         await query.edit_message_text(text=msg, reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
@@ -759,7 +757,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 msg = await context.bot.send_photo(admin, photo=photo_id, caption=f"🔔 <b>New Payment!</b>\n\n👤 User: {get_mention(user_id, user_name)}\n📦 Plan: <code>{disp}</code>", reply_markup=InlineKeyboardMarkup(kb), parse_mode='HTML')
                 context.bot_data['payments'][payment_id]['msgs'].append((admin, msg.message_id))
             except: pass
-        await update.message.reply_text("✅ ငွေလွှဲပြေစာကို Admin ထံ ပို့ဆောင်ပြီးပါပြီ。")
+        await update.message.reply_text("✅ ငွေလွှဲပြေစာကို Admin ထံ ပို့ဆောင်ပြီးပါပြီ©")
     else: await update.message.reply_text("⚠️ ကျေးဇူးပြု၍ Plan အရင်ရွေးချယ်ပြီးမှ Screenshot ပို့ပေးပါ။")
 
 async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -767,8 +765,7 @@ async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_T
     await query.answer()
     if not query.data.startswith("pay_"): return
     parts = query.data.split("_")
-    action_code = parts[1]
-    payment_id = parts[2]
+    action_code, payment_id = parts[1], parts[2]
     payment_info = context.bot_data.get('payments', {}).get(payment_id)
     
     if not payment_info:
@@ -776,10 +773,7 @@ async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_T
         except: pass
         return
         
-    target_user_id = payment_info['user_id']
-    plan_key = payment_info['plan_key']
-    target_uname = payment_info['user_name']
-    msgs_to_edit = payment_info['msgs']
+    target_user_id, plan_key, target_uname, msgs_to_edit = payment_info['user_id'], payment_info['plan_key'], payment_info['user_name'], payment_info['msgs']
     del context.bot_data['payments'][payment_id]
     
     status_text = f"✅ Approved" if action_code == 'app' else f"❌ Rejected"
@@ -798,10 +792,9 @@ async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_T
         if not plan_info: return conn.close()
         try:
             access_url, key_name = generate_vpn_key(target_user_id, plan_info['plan_type'], plan_info['data_gb'], plan_info['months'])
-            await context.bot.send_message(target_user_id, f"🎉 **ငွေသွင်းမှု အတည်ပြုပြီးပါပြီ。**\n\n👤 **Name:** `{key_name}`\n\n👇 **အောက်ပါ Key ကို Copy ကူးပြီး Outline VPN တွင် ထည့်သွင်းအသုံးပြုနိုင်ပါပြီ。**", parse_mode='Markdown')
+            await context.bot.send_message(target_user_id, f"🎉 **ငွေသွင်းမှု အတည်ပြုပြီးပါပြီ©**\n\n👤 **Name:** `{key_name}`\n\n👇 **အောက်ပါ Key ကို Copy ကူးပြီး Outline VPN တွင် ထည့်သွင်းအသုံးပြုနိုင်ပါပြီ©**", parse_mode='Markdown')
             await context.bot.send_message(target_user_id, f"`{access_url}`", parse_mode='Markdown')
             await context.bot.send_message(target_user_id, PROMO_MSG, reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
-            
             if has_rated == 0:
                 if context.job_queue: context.job_queue.run_once(send_rating_request, 3600, data=target_user_id)
                 c.execute("UPDATE users SET has_rated=1 WHERE telegram_id=%s", (target_user_id,))
@@ -819,124 +812,77 @@ async def fb_approval_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     query = update.callback_query
     await query.answer()
     data = query.data
-
     if data.startswith("fbapp_"):
         await query.edit_message_caption(caption=f"{query.message.caption}\n\n⏳ Processing Key for FB User...")
         try:
             rest = data[6:]
             parts = rest.rsplit("_", 1)
-            plan_code = parts[0]
-            fb_psid = parts[1]
-
+            plan_code, fb_psid = parts[0], parts[1]
             get_or_create_user(int(fb_psid), username=f"FB_{fb_psid}")
             plan_info = get_plan_details().get(plan_code)
             if not plan_info: return await query.edit_message_caption(caption="❌ Error: Database ထဲတွင် Plan မရှိပါ။")
-
             access_url, key_name = generate_vpn_key(int(fb_psid), plan_info['plan_type'], plan_info['data_gb'], plan_info['months'])
-
             fb_token = os.environ.get("FB_PAGE_ACCESS_TOKEN")
-            if not fb_token: return await query.edit_message_caption(caption=f"{query.message.caption_html}\n\n❌ **Error:** Telegram Bot တွင် `FB_PAGE_ACCESS_TOKEN` မရှိပါ။", parse_mode='HTML')
-
-            fb_msg1 = f"🎉 ငွေသွင်းမှု အတည်ပြုပြီးပါပြီ。\n\n👤 Name: {key_name}\n\n👇 အောက်ပါ Key ကို Copy ကူးပြီး Outline VPN တွင် ထည့်သွင်းအသုံးပြုနိုင်ပါပြီ。"
+            if not fb_token: return await query.edit_message_caption(caption=f"{query.message.caption_html}\n\n❌ **Error:** FB Token မရှိပါ။", parse_mode='HTML')
             url = f"https://graph.facebook.com/v18.0/me/messages?access_token={fb_token}"
-            
-            requests.post(url, json={"recipient": {"id": fb_psid}, "message": {"text": fb_msg1}})
+            requests.post(url, json={"recipient": {"id": fb_psid}, "message": {"text": f"🎉 အတည်ပြုပြီးပါပြီ©\n\n👤 Name: {key_name}"}})
             res = requests.post(url, json={"recipient": {"id": fb_psid}, "message": {"text": access_url}}) 
-            requests.post(url, json={"recipient": {"id": fb_psid}, "message": {"text": PROMO_MSG}})
-
-            if res.status_code == 200: await query.edit_message_caption(caption=f"{query.message.caption_html}\n\n✅ **Approved & Key Sent to FB User!**\nKey: <code>{key_name}</code>", parse_mode='HTML')
-            else: await query.edit_message_caption(caption=f"{query.message.caption_html}\n\n❌ **FB သို့ စာပို့မရပါ။ Error:**\n<code>{res.text}</code>", parse_mode='HTML')
-
-        except Exception as e:
-            await query.edit_message_caption(caption=f"{query.message.caption_html}\n\n❌ **System Error:**\n<code>{str(e)}</code>", parse_mode='HTML')
-
+            if res.status_code == 200: await query.edit_message_caption(caption=f"{query.message.caption_html}\n\n✅ **Approved & Key Sent to FB User!**", parse_mode='HTML')
+            else: await query.edit_message_caption(caption=f"{query.message.caption_html}\n\n❌ **FB Error:** <code>{res.text}</code>", parse_mode='HTML')
+        except Exception as e: await query.edit_message_caption(caption=f"❌ System Error: {str(e)}")
     elif data.startswith("fbrej_"):
         fb_psid = data[6:]
         fb_token = os.environ.get("FB_PAGE_ACCESS_TOKEN")
         if fb_token:
-            fb_msg = "❌ ငွေသွင်းမှု မအောင်မြင်ပါ။\n\nငွေသွင်းပြေစာ မှားယွင်းနေပါသည်။ ကျေးဇူးပြု၍ မှန်ကန်သော ပြေစာကို ပြန်လည်ပေးပို့ပေးပါ။"
             url = f"https://graph.facebook.com/v18.0/me/messages?access_token={fb_token}"
-            requests.post(url, json={"recipient": {"id": fb_psid}, "message": {"text": fb_msg}})
+            requests.post(url, json={"recipient": {"id": fb_psid}, "message": {"text": "❌ ငွေသွင်းမှု မအောင်မြင်ပါ။ ပြေစာ မှားယွင်းနေပါသည်။"}})
         await query.edit_message_caption(caption=f"{query.message.caption_html}\n\n❌ **Rejected**", parse_mode='HTML')
 
 async def check_expired_keys(context: ContextTypes.DEFAULT_TYPE):
     conn = get_db()
     c = conn.cursor()
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
     c.execute("SELECT p.key_id, p.telegram_id, p.plan_type, u.username, p.end_date, p.data_limit FROM plans p JOIN users u ON p.telegram_id = u.telegram_id WHERE p.is_active = 1")
     active_plans = c.fetchall()
-    
     if active_plans:
         try:
             client = get_outline_client()
             all_keys = client.get_keys()
             usage_dict = calculate_and_sync_usage(all_keys)
-        except Exception as e:
+        except:
             conn.close()
             return
-
         for kid, tid, ptype, uname, end_date, dlimit in active_plans:
-            is_expired_time = False
-            is_expired_data = False
+            is_expired_time = end_date and end_date <= now_str
             total_used = usage_dict.get(str(kid), 0)
-            
-            if end_date and end_date <= now_str:
-                is_expired_time = True
-                
-            if dlimit and total_used >= dlimit:
-                is_expired_data = True
-                    
+            is_expired_data = dlimit and total_used >= dlimit
             if is_expired_time or is_expired_data:
                 try: client.delete_key(kid)
                 except: pass
-                
                 try:
                     c.execute("UPDATE plans SET is_active = 0, expired_at = %s WHERE key_id = %s", (now_str, kid))
-                    
-                    if is_expired_data:
-                        msg = f"⚠️ **အသိပေးချက်:** လူကြီးမင်း၏ Plan သည် သတ်မှတ် Data ပမာဏ ({total_used/1e9:.2f}GB / {dlimit/1e9:.0f}GB) ပြည့်သွားပါပြီ။\nမှတ်တမ်းကို Bot တွင် (၅) ရက်အထိ ဆက်လက်ကြည့်ရှုနိုင်ပါသည်။"
-                    else:
-                        msg = "⚠️ **Free Trial** ကုန်ဆုံးပါပြီ。" if ptype == "FreeTrial" else "⚠️ **VPN သက်တမ်း** ကုန်ဆုံးသွားပါပြီ。\nမှတ်တမ်းကို Bot တွင် (၅) ရက်အထိ ဆက်လက်ကြည့်ရှုနိုင်ပါသည်။"
-                        
+                    msg = f"⚠️ **Data ပြည့်သွားပါပြီ ({total_used/1e9:.2f}GB)**" if is_expired_data else "⚠️ **သက်တမ်း ကုန်ဆုံးသွားပါပြီ©**"
                     await context.bot.send_message(tid, msg, reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
                 except: pass
-                
     five_days_ago = (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d %H:%M:%S")
-    c.execute("DELETE FROM plans WHERE is_active = 0 AND expired_at IS NOT NULL AND expired_at <= %s", (five_days_ago,))
-    
+    c.execute("DELETE FROM plans WHERE is_active = 0 AND expired_at <= %s", (five_days_ago,))
     conn.commit()
     conn.close()
 
 async def send_kamatera_traffic_report(context: ContextTypes.DEFAULT_TYPE):
-    KAMATERA_IP = "79.108.225.57" 
-    KAMATERA_PASS = "Showtee123!@#$"
-    
+    KAMATERA_IP, KAMATERA_PASS = "79.108.225.57", "Showtee123!@#$"
     in_gb, out_gb = get_kamatera_traffic(KAMATERA_IP, KAMATERA_PASS)
-    
     if in_gb is not None and out_gb is not None:
-        server_total_gb = in_gb + out_gb
-        kamatera_status_text = (
-            f"⏰ <b>12-Hour Kamatera Traffic Update</b>\n\n"
-            f"☁️ <b>Server Traffic:</b>\n"
-            f"⬇️ Inbound: <code>{in_gb:.2f} GB</code>\n"
-            f"⬆️ Outbound: <code>{out_gb:.2f} GB</code>\n"
-            f"📊 Total Network: <b>{server_total_gb:.2f} GB</b>\n\n"
-            f"⚠️ <i>(900 GB ရောက်ပါက Server အသစ်ပြောင်းရန် ပြင်ဆင်ပါ)</i>"
-        )
-    else:
-        kamatera_status_text = "⏰ <b>12-Hour Kamatera Traffic Update</b>\n\n☁️ Kamatera Server Data: ⚠️ <code>(SSH ချိတ်ဆက်၍မရပါ - Password စစ်ပါ)</code>"
-
+        text = f"⏰ <b>Kamatera Traffic Update</b>\n\n⬇️ In: <code>{in_gb:.2f} GB</code>\n⬆️ Out: <code>{out_gb:.2f} GB</code>\n📊 Total: <b>{(in_gb+out_gb):.2f} GB</b>"
+    else: text = "⏰ <b>Kamatera Update:</b> ⚠️ SSH Connection Failed."
     for admin in ADMIN_IDS:
-        try:
-            await context.bot.send_message(chat_id=admin, text=kamatera_status_text, parse_mode='HTML')
-        except Exception as e:
-            pass
+        try: await context.bot.send_message(chat_id=admin, text=text, parse_mode='HTML')
+        except: pass
 
 async def send_daily_report(context: ContextTypes.DEFAULT_TYPE):
     for admin in ADMIN_IDS:
-        try: await context.bot.send_message(chat_id=admin, text="✅ **Daily Status Report**\n\nBot is running perfectly. Have a great day!", parse_mode='Markdown')
-        except Exception as e: pass
+        try: await context.bot.send_message(chat_id=admin, text="✅ **Bot is running perfectly.**", parse_mode='Markdown')
+        except: pass
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logging.error(msg="Exception while handling an update:", exc_info=context.error)
@@ -950,26 +896,21 @@ async def post_init(application: Application):
 def main():
     keep_alive()
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
-    
     if app.job_queue:
         app.job_queue.run_repeating(check_expired_keys, interval=60, first=10)
         app.job_queue.run_repeating(send_kamatera_traffic_report, interval=43200, first=30)
-        
         mmt_tz = timezone(timedelta(hours=6, minutes=30))
         app.job_queue.run_daily(send_daily_report, time=time(hour=8, minute=30, tzinfo=mmt_tz))
-    
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("admin", admin_panel))
     app.add_handler(CommandHandler("deluser", delete_user_command)) 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-    
     app.add_handler(CallbackQueryHandler(fb_approval_handler, pattern="^fb(app|rej)_"))
     app.add_handler(CallbackQueryHandler(admin_approval_handler, pattern="^pay_(app|rej)_"))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_error_handler(error_handler)
-    
-    print("✅ Bot is running successfully on PostgreSQL...")
+    print("✅ Bot is running successfully...")
     app.run_polling()
 
 if __name__ == '__main__':
