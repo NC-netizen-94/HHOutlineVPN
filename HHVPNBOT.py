@@ -95,9 +95,7 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS users (telegram_id BIGINT PRIMARY KEY, unique_id TEXT, is_trial_used INT, username TEXT, referred_by BIGINT, referral_reward_claimed INT DEFAULT 0, has_rated INT DEFAULT 0)''')
     c.execute('''CREATE TABLE IF NOT EXISTS plans (id SERIAL PRIMARY KEY, telegram_id BIGINT, key_id TEXT, plan_type TEXT, data_limit BIGINT, start_date TEXT, end_date TEXT, is_active INT, username TEXT)''')
     
-    try: c.execute("ALTER TABLE plans ADD COLUMN accumulated_bytes BIGINT DEFAULT 0")
-    except psycopg2.Error: pass
-    try: c.execute("ALTER TABLE plans ADD COLUMN last_known_bytes BIGINT DEFAULT 0")
+    try: c.execute("ALTER TABLE plans ADD COLUMN current_used_bytes BIGINT DEFAULT 0")
     except psycopg2.Error: pass
     try: c.execute("ALTER TABLE plans ADD COLUMN expired_at TEXT")
     except psycopg2.Error: pass
@@ -151,46 +149,17 @@ def get_kamatera_traffic(ip, password):
         return None, None
 
 
-# 🌟 THE BULLETPROOF DELTA LOGIC (SERVER-SWITCH SAFE) 🌟
+# 🌟 THE SIMPLEST DATA SYNC LOGIC (Direct Copy from Server) 🌟
 def calculate_and_sync_usage(all_keys):
     conn = get_db()
     c = conn.cursor()
-    c.execute("SELECT key_id, accumulated_bytes, last_known_bytes FROM plans WHERE is_active = 1")
-    db_plans = {str(r[0]): {'acc': r[1] or 0, 'last': r[2] or 0} for r in c.fetchall()}
 
     usage_dict = {}
     for k in all_keys:
         kid = str(k.key_id)
-        
-        # API Glitch Filter: API မှ Data မပို့ပါက (None ဖြစ်နေပါက) ရောင်ရမ်းပြီး 0 သို့မပြောင်းစေရန် ကျော်သွားမည်။
-        raw_used = getattr(k, 'used_bytes', None)
-        if raw_used is None:
-            if kid in db_plans:
-                usage_dict[kid] = db_plans[kid]['acc']
-            continue
-            
-        curr_b = int(raw_used)
-
-        if kid in db_plans:
-            acc = int(db_plans[kid]['acc'])
-            last = int(db_plans[kid]['last'])
-
-            if curr_b >= last:
-                # ပုံမှန်အသုံးပြုမှု: ဆာဗာ Data က Database ထဲက Data ထက်များနေပါက အပို (Delta) ကိုသာ ပေါင်းထည့်မည်
-                delta = curr_b - last
-                acc += delta
-                last = curr_b
-            else:
-                # ဆာဗာအသစ်ပြောင်းခြင်း: curr_b က last ထက်ငယ်သွားပါက ဆာဗာအသစ်ပြောင်းလိုက်သည်ဟု မှတ်ယူပြီး 
-                # အဟောင်း Data များကို လုံးဝမဖျက်ဘဲ (acc ကိုဆက်ထားပြီး) Data အသစ်များကို ထပ်ပေါင်းသွားမည်။
-                delta = curr_b
-                acc += delta
-                last = curr_b
-
-            c.execute("UPDATE plans SET accumulated_bytes=%s, last_known_bytes=%s WHERE key_id=%s", (acc, last, kid))
-            usage_dict[kid] = acc
-        else:
-            usage_dict[kid] = curr_b
+        curr_b = int(getattr(k, 'used_bytes', 0) or 0)
+        c.execute("UPDATE plans SET current_used_bytes=%s WHERE key_id=%s AND is_active=1", (curr_b, kid))
+        usage_dict[kid] = curr_b
 
     conn.commit()
     conn.close()
@@ -262,7 +231,7 @@ def generate_vpn_key(telegram_id, plan_type, data_gb=None, months=None):
         try: client.add_data_limit(new_key.key_id, int(data_bytes))
         except Exception as e: logging.error(f"Failed to set data limit on outline server: {e}")
 
-    c.execute('''INSERT INTO plans (telegram_id, key_id, plan_type, data_limit, start_date, end_date, is_active, username) VALUES (%s, %s, %s, %s, %s, %s, 1, %s)''', (telegram_id, new_key.key_id, plan_type, data_bytes, db_start_date, db_end_date, raw_username))
+    c.execute('''INSERT INTO plans (telegram_id, key_id, plan_type, data_limit, start_date, end_date, is_active, username, current_used_bytes) VALUES (%s, %s, %s, %s, %s, %s, 1, %s, 0)''', (telegram_id, new_key.key_id, plan_type, data_bytes, db_start_date, db_end_date, raw_username))
     conn.close()
     final_url = f"{new_key.access_url.split('#')[0]}#{urllib.parse.quote(suffix)}"
     return final_url, suffix
@@ -556,7 +525,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             row_gb = c.fetchone()
             total_server_gb = int(row_gb[0]) if row_gb else 2000
             
-            c.execute("SELECT accumulated_bytes FROM plans WHERE is_active=1")
+            c.execute("SELECT current_used_bytes FROM plans WHERE is_active=1")
             all_active_usage = c.fetchall()
             conn.close()
             
@@ -619,25 +588,30 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = f"✏️ ရွေးချယ်ထားသော Plan: `{plans_dict.get(plan_key, {}).get('short_name', plan_key)}`\n\n**Plan အမည်သစ်ကို | ခံ၍ ရိုက်ထည့်ပါ။**\n`Short Name | Display Name`"
         await query.edit_message_text(msg, reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
 
+    # 🌟 ADMIN VIEW USERS (DIRECT SERVER FETCH) 🌟
     elif data == 'admin_view_users':
-        await query.edit_message_text("⏳ Data များကို ဆွဲယူနေပါသည်...")
+        await query.edit_message_text("⏳ Data များကို Outline Server မှ တိုက်ရိုက်ဆွဲယူနေပါသည်...")
         conn = get_db()
         c = conn.cursor()
-        c.execute("SELECT u.telegram_id, u.username, p.plan_type, p.end_date, p.key_id, p.data_limit, p.accumulated_bytes FROM plans p JOIN users u ON p.telegram_id = u.telegram_id WHERE p.is_active=1")
+        c.execute("SELECT u.telegram_id, u.username, p.plan_type, p.end_date, p.key_id, p.data_limit, p.current_used_bytes FROM plans p JOIN users u ON p.telegram_id = u.telegram_id WHERE p.is_active=1")
         users_data = c.fetchall()
         conn.close()
         
         if not users_data: return await query.edit_message_text("လက်ရှိ Active ဖြစ်နေသော User မရှိသေးပါ။", reply_markup=BACK_TO_ADMIN_MARKUP)
         try: 
-            all_keys = get_outline_client().get_keys()
-        except Exception as e: return await query.edit_message_text(f"❌ Server Error: {e}", reply_markup=BACK_TO_ADMIN_MARKUP)
+            client = get_outline_client()
+            all_keys = client.get_keys()
+        except Exception as e: 
+            return await query.edit_message_text(f"❌ Server Error: {e}", reply_markup=BACK_TO_ADMIN_MARKUP)
             
-        msg = "👥 <b>Active Users List</b>\n\n"
-        for tid, uname, ptype, edate, kid, dlimit, acc_bytes in users_data:
+        msg = "👥 <b>Active Users List (Real-time)</b>\n\n"
+        for tid, uname, ptype, edate, kid, dlimit, current_bytes in users_data:
             matched_key = next((k for k in all_keys if str(k.key_id) == str(kid)), None)
             final_url = f"{matched_key.access_url.split('#')[0]}#{matched_key.name or f'Key_{kid}'}" if matched_key else "Not Found"
             
-            used_gb = (acc_bytes or 0) / 1e9
+            # Use Direct Outline Server Data if available, else fallback to DB
+            real_used_bytes = int(getattr(matched_key, 'used_bytes', 0) or 0) if matched_key else current_bytes
+            used_gb = real_used_bytes / 1e9
             
             if dlimit:
                 limit_gb = dlimit / 1e9
@@ -701,21 +675,39 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = "🛒 **ဝယ်ယူလိုသော Plan ကို ရွေးချယ်ပါ:**\n\n✅ **100% Full Speed:** ဝယ်ယူထားသော Data မကုန်မချင်း အမြန်နှုန်း အပြည့်ဖြင့် အသုံးပြုနိုင်ပါသည်။"
         await query.edit_message_text(text=msg, reply_markup=get_plans_keyboard(plans_dict), parse_mode='Markdown')
         
+    # 🌟 USER PLAN/DATA (DIRECT SERVER FETCH) 🌟
     elif data == 'my_plan':
-        await query.edit_message_text("⏳ အချက်အလက်များ ရှာဖွေနေပါသည်...")
+        await query.edit_message_text("⏳ အချက်အလက်များကို Outline Server မှ တိုက်ရိုက်ရှာဖွေနေပါသည်...")
         conn = get_db()
         c = conn.cursor()
         
-        c.execute("SELECT plan_type, data_limit, start_date, end_date, accumulated_bytes, is_active, expired_at FROM plans WHERE telegram_id=%s AND is_active IN (0, 1)", (user_id,))
+        c.execute("SELECT plan_type, data_limit, start_date, end_date, current_used_bytes, is_active, expired_at, key_id FROM plans WHERE telegram_id=%s AND is_active IN (0, 1)", (user_id,))
         user_plans = c.fetchall()
         conn.close()
         
         if not user_plans: return await query.edit_message_text("❌ လက်ရှိ Plan သို့မဟုတ် မှတ်တမ်း မရှိသေးပါ။", reply_markup=BACK_TO_MAIN_MARKUP)
 
+        try:
+            client = get_outline_client()
+            all_keys = client.get_keys()
+        except Exception as e:
+            return await query.edit_message_text(f"❌ Server Error: Outline Server နှင့် ချိတ်ဆက်၍မရပါ။ ({e})", reply_markup=BACK_TO_MAIN_MARKUP)
+
         msg = "👤 **လက်ရှိ Plan နှင့် မှတ်တမ်းများ**\n\n"
-        for ptype, dlimit, sdate, edate, acc_bytes, is_active, exp_at in user_plans:
+        for ptype, dlimit, sdate, edate, current_bytes, is_active, exp_at, kid in user_plans:
             
-            used_gb = (acc_bytes or 0) / 1e9
+            # Fetch directly from Outline Key Object if active
+            real_used_bytes = 0
+            if is_active == 1:
+                matched_key = next((k for k in all_keys if str(k.key_id) == str(kid)), None)
+                if matched_key:
+                    real_used_bytes = int(getattr(matched_key, 'used_bytes', 0) or 0)
+                else:
+                    real_used_bytes = current_bytes # Backup fallback
+            else:
+                real_used_bytes = current_bytes # If expired, show DB history
+
+            used_gb = real_used_bytes / 1e9
             disp_plan = next((details['display'] for key, details in plans_dict.items() if details['plan_type'] == ptype), ptype)
             
             if is_active == 1:
