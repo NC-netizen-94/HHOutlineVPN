@@ -70,7 +70,7 @@ async def safe_delete_message(message):
 
 async def send_auto_backup(context: ContextTypes.DEFAULT_TYPE, target_id: int, target_uname: str, action_text: str):
     try:
-        caption = f"☁️ <b>Cloud Sync Successful</b>\n{get_mention(target_id, target_uname)} သို့ {action_text}ပြီးနောက် အချက်အလက်များကို လုံခြုံစွာ Cloud တွင် သိမ်းဆည်းလိုက်ပါပြီ।"
+        caption = f"☁️ <b>Cloud Sync Successful</b>\n{get_mention(target_id, target_uname)} သို့ {action_text}ပြီးနောက် အချက်အလက်များကို လုံခြုံစွာ Cloud တွင် သိမ်းဆည်းလိုက်ပါပြီ。"
         for admin in ADMIN_IDS:
             try: await context.bot.send_message(admin, text=caption, parse_mode='HTML')
             except: pass
@@ -104,8 +104,9 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''')
     upsert_query = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
     
-    NEW_API_URL = 'https://79.108.225.57:20433/NfIsVh7WjfzcXgAy5arU0Q'
-    NEW_CERT = '4B07FF08AD7B31F5C5BBC78EE266A7C554EEBC4C088FC4AD9D23A91C6AE86777'
+    # 🌟 UPDATED API URL AND CERT SHA 🌟
+    NEW_API_URL = 'https://194.36.88.172:11236/jAycy_SJSIk2zYta6jSWNA'
+    NEW_CERT = '360A41E53BD63C2E143362F2D1AF255A690BA7958D17504389898D4938AED744'
 
     c.execute(upsert_query, ('outline_api_url', NEW_API_URL))
     c.execute(upsert_query, ('outline_cert_sha256', NEW_CERT))
