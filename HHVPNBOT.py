@@ -856,7 +856,7 @@ async def check_expired_keys(context: ContextTypes.DEFAULT_TYPE):
     conn.close()
 
 async def send_kamatera_traffic_report(context: ContextTypes.DEFAULT_TYPE):
-    KAMATERA_IP, KAMATERA_PASS = "79.108.225.57", "Showtee123!@#$"
+    KAMATERA_IP, KAMATERA_PASS = "194.36.88.172", "HHoutlinevpn@123"
     in_gb, out_gb = get_kamatera_traffic(KAMATERA_IP, KAMATERA_PASS)
     if in_gb is not None and out_gb is not None:
         text = f"⏰ <b>Kamatera Traffic Update</b>\n\n⬇️ In: <code>{in_gb:.2f} GB</code>\n⬆️ Out: <code>{out_gb:.2f} GB</code>\n📊 Total: <b>{(in_gb+out_gb):.2f} GB</b>"
