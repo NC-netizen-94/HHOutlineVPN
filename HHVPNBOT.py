@@ -564,8 +564,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             warning_limit = total_server_gb * 0.7
             srv_status = f"🔴 <b>DANGER:</b> Server အသစ် အမြန်ဝယ်ရန် လိုအပ်နေပါပြီ©" if total_used_gb >= danger_limit else (f"🟡 <b>WARNING:</b> မကြာမီ Server အသစ်ဝယ်ရန် ပြင်ဆင်ထားပါ။" if total_used_gb >= warning_limit else "🟢 <b>NORMAL:</b> Server အခြေအနေ ကောင်းမွန်ပါသေးသည်။")
             
-            KAMATERA_IP = "79.108.225.57" 
-            KAMATERA_PASS = "Showtee123!@#$"
+            KAMATERA_IP = "194.36.88.172" 
+            KAMATERA_PASS = "HHoutlinevpn@123"
             in_gb, out_gb = get_kamatera_traffic(KAMATERA_IP, KAMATERA_PASS)
             
             if in_gb is not None and out_gb is not None:
