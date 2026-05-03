@@ -104,7 +104,6 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''')
     upsert_query = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
     
-    # 🌟 UPDATED API URL AND CERT SHA 🌟
     NEW_API_URL = 'https://194.36.88.172:11236/jAycy_SJSIk2zYta6jSWNA'
     NEW_CERT = '360A41E53BD63C2E143362F2D1AF255A690BA7958D17504389898D4938AED744'
 
@@ -113,6 +112,8 @@ def init_db():
     
     ignore_query = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING"
     c.execute(ignore_query, ('total_server_gb', '2000'))
+    c.execute(ignore_query, ('monthly_cost', '25000'))
+    
     c.execute('''CREATE TABLE IF NOT EXISTS plan_configs (plan_key TEXT PRIMARY KEY, short_name TEXT, display_name TEXT, plan_type TEXT, data_gb INT, months INT)''')
     c.execute("DELETE FROM plan_configs")
     default_plans = [
@@ -245,7 +246,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except ValueError: pass
     get_or_create_user(user.id, username, referred_by)
     
-    # 🌟 Free Trial button ပိတ်ထားသည်
     keyboard = [
         [InlineKeyboardButton("🛒 Plan ဝယ်ရန်", callback_data='buy_plan')],
         [InlineKeyboardButton("👤 Plan/Data စစ်ရန်", callback_data='my_plan'), InlineKeyboardButton("❓ အသုံးပြုပုံ", callback_data='how_to_use')],
@@ -277,7 +277,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("👥 View Users Plans", callback_data='admin_view_users'), InlineKeyboardButton("⚠️ Expiring Soon", callback_data='admin_expiring')],
         [InlineKeyboardButton("➕ Manual Key ထုတ်ရန်", callback_data='admin_manual_key'), InlineKeyboardButton("📝 Plan အမည်များ ပြင်ရန်", callback_data='admin_edit_plans')],
         [InlineKeyboardButton("📊 စီးပွားရေးနှင့် Server အခြေအနေ", callback_data='admin_server_stats'), InlineKeyboardButton("💽 Server Storage ပြင်ရန်", callback_data='admin_change_storage')],
-        [InlineKeyboardButton("☁️ AWS ချိတ်ဆက်ရန်", callback_data='admin_aws_setup'), InlineKeyboardButton("💾 Database Backup ယူရန်", callback_data='admin_manual_backup')],
+        [InlineKeyboardButton("💰 လစဉ်အရင်း ပြင်ရန်", callback_data='admin_change_cost'), InlineKeyboardButton("💾 Database Backup ယူရန်", callback_data='admin_manual_backup')],
         [InlineKeyboardButton("📢 Broadcast", callback_data='admin_broadcast'), InlineKeyboardButton("🗑️ စနစ်တစ်ခုလုံး Reset ချရန်", callback_data='admin_reset_system')]
     ]
     msg = "🛡️ **Admin Panel ရောက်ပါပြီ။**\n👇 လုပ်ဆောင်လိုသော မီနူးကို ရွေးချယ်ပါ။"
@@ -336,20 +336,18 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"✅ Server ၏ Storage ကို **{new_gb} GB** အဖြစ် အောင်မြင်စွာ ပြောင်းလဲသတ်မှတ်လိုက်ပါပြီ©", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
         except ValueError: await update.message.reply_text("❌ ကျေးဇူးပြု၍ Storage ပမာဏကို ဂဏန်းသက်သက်သာ ရိုက်ထည့်ပါ။ (ဥပမာ - 1000, 2000)", parse_mode='Markdown')
 
-    elif state == 'waiting_for_aws_setup' and update.effective_user.id in ADMIN_IDS:
-        parts = text.split('|')
-        if len(parts) != 4: return await update.message.reply_text("❌ Format မှားယွင်းနေပါသည်။ \n`AccessKey | SecretKey | Region | InstanceName` ပုံစံဖြင့် မှန်ကန်စွာ ရိုက်ထည့်ပါ။", parse_mode='Markdown')
-        ak, sk, reg, iname = map(str.strip, parts)
-        conn = get_db()
-        c = conn.cursor()
-        aws_q = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
-        c.execute(aws_q, ('aws_access_key', ak))
-        c.execute(aws_q, ('aws_secret_key', sk))
-        c.execute(aws_q, ('aws_region', reg))
-        c.execute(aws_q, ('aws_instance_name', iname))
-        conn.close()
-        del context.user_data['state']
-        await update.message.reply_text("✅ AWS အချက်အလက်များ အောင်မြင်စွာ မှတ်သားပြီးပါပြီ©", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
+    elif state == 'waiting_for_cost' and update.effective_user.id in ADMIN_IDS:
+        try:
+            new_cost = int(text.strip())
+            conn = get_db()
+            c = conn.cursor()
+            upsert_cost = "INSERT INTO settings (key, value) VALUES ('monthly_cost', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+            c.execute(upsert_cost, (str(new_cost),))
+            conn.close()
+            del context.user_data['state']
+            await update.message.reply_text(f"✅ လစဉ် အရင်းပမာဏကို **{new_cost:,} ကျပ်** အဖြစ် အောင်မြင်စွာ ပြောင်းလဲသတ်မှတ်လိုက်ပါပြီ©", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
+        except ValueError:
+            await update.message.reply_text("❌ ကျေးဇူးပြု၍ ပမာဏကို ဂဏန်းသက်သက်သာ ရိုက်ထည့်ပါ။ (ဥပမာ - 25000, 30000)", parse_mode='Markdown')
 
     elif state and state.startswith('waiting_for_plan_name_') and update.effective_user.id in ADMIN_IDS:
         plan_key = state.replace('waiting_for_plan_name_', '')
@@ -413,13 +411,44 @@ async def send_rating_request(context: ContextTypes.DEFAULT_TYPE):
 async def send_htu_guide(query, context, os_type):
     user_id = query.from_user.id
     await safe_delete_message(query.message)
-    if os_type == 'android': text, img_path, url = "🤖 **Android ဖုန်းများအတွက် အသုံးပြုပုံ**\n\nအောက်ပါပုံတွင် ကြည့်ရှုနိုင်ပါသည်။", ANDROID_SS_PATH, "https://play.google.com/store/apps/details?id=org.outline.android.client&hl=en_SG"
-    else: text, img_path, url = "🍎 **Apple (iOS) ဖုန်းများအတွက် အသုံးပြုပုံ**\n\nအောက်ပါပုံတွင် ကြည့်ရှုနိုင်ပါသည်။", APPLE_SS_PATH, "https://apps.apple.com/us/app/outline-app/id1356177741"
-    markup = InlineKeyboardMarkup([[InlineKeyboardButton("📥 Outline App Download ဆွဲရန်", url=url)], [InlineKeyboardButton("🔙 Menu သို့ပြန်သွားရန်", callback_data='back_to_main')]])
-    await context.bot.send_message(chat_id=user_id, text=text, parse_mode='Markdown')
-    if os.path.exists(img_path):
-        with open(img_path, 'rb') as f: await context.bot.send_photo(chat_id=user_id, photo=f, caption="App ကို Download ဆွဲယူရန် အောက်ပါ Menu ကိုနှိပ်ပါ။ 👇", reply_markup=markup, parse_mode='Markdown')
-    else: await context.bot.send_message(chat_id=user_id, text="App ကို Download ဆွဲယူရန် အောက်ပါ Menu ကိုနှိပ်ပါ။ 👇", reply_markup=markup, parse_mode='Markdown')
+    
+    if os_type == 'android': 
+        text = "🤖 **Android ဖုန်းများအတွက် အသုံးပြုပုံ**\n\nအောက်ပါပုံတွင် ကြည့်ရှုနိုင်ပါသည်။"
+        img_path = ANDROID_SS_PATH
+        url = "https://play.google.com/store/apps/details?id=org.outline.android.client&hl=en_SG"
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton("📥 Outline App Download ဆွဲရန်", url=url)], [InlineKeyboardButton("🔙 Menu သို့ပြန်သွားရန်", callback_data='back_to_main')]])
+        await context.bot.send_message(chat_id=user_id, text=text, parse_mode='Markdown')
+        if os.path.exists(img_path):
+            with open(img_path, 'rb') as f: await context.bot.send_photo(chat_id=user_id, photo=f, caption="App ကို Download ဆွဲယူရန် အောက်ပါ Menu ကိုနှိပ်ပါ။ 👇", reply_markup=markup, parse_mode='Markdown')
+        else: await context.bot.send_message(chat_id=user_id, text="App ကို Download ဆွဲယူရန် အောက်ပါ Menu ကိုနှိပ်ပါ။ 👇", reply_markup=markup, parse_mode='Markdown')
+        
+    elif os_type == 'apple': 
+        text = "🍎 **Apple (iOS) ဖုန်းများအတွက် အသုံးပြုပုံ**\n\nအောက်ပါပုံတွင် ကြည့်ရှုနိုင်ပါသည်။"
+        img_path = APPLE_SS_PATH
+        url = "https://apps.apple.com/us/app/outline-app/id1356177741"
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton("📥 Outline App Download ဆွဲရန်", url=url)], [InlineKeyboardButton("🔙 Menu သို့ပြန်သွားရန်", callback_data='back_to_main')]])
+        await context.bot.send_message(chat_id=user_id, text=text, parse_mode='Markdown')
+        if os.path.exists(img_path):
+            with open(img_path, 'rb') as f: await context.bot.send_photo(chat_id=user_id, photo=f, caption="App ကို Download ဆွဲယူရန် အောက်ပါ Menu ကိုနှိပ်ပါ။ 👇", reply_markup=markup, parse_mode='Markdown')
+        else: await context.bot.send_message(chat_id=user_id, text="App ကို Download ဆွဲယူရန် အောက်ပါ Menu ကိုနှိပ်ပါ။ 👇", reply_markup=markup, parse_mode='Markdown')
+        
+    # 🌟 NEW: PC FILE ID LOGIC 🌟
+    elif os_type == 'pc':
+        text = "💻 **PC (Windows) အတွက် အသုံးပြုပုံ**\n\nအောက်ပါဖိုင်ကို Download ဆွဲပြီး Install လုပ်ပါ။ ပြီးလျှင် Admin ပေးသော Key ကို ထည့်သွင်းအသုံးပြုနိုင်ပါသည်။"
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu သို့ပြန်သွားရန်", callback_data='back_to_main')]])
+        await context.bot.send_message(chat_id=user_id, text=text, parse_mode='Markdown')
+        
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("SELECT value FROM settings WHERE key='pc_installer_file_id'")
+        row = c.fetchone()
+        conn.close()
+        
+        if row:
+            file_id = row[0]
+            await context.bot.send_document(chat_id=user_id, document=file_id, caption="📥 PC Outline Client (Windows)", reply_markup=markup)
+        else:
+            await context.bot.send_message(chat_id=user_id, text="*(⚠️ PC အတွက် Installer ဖိုင် မရှိသေးပါ။ Admin မှ Bot ထဲသို့ ဖိုင်အရင် ပို့ပေးရန် လိုအပ်ပါသည်။)*", reply_markup=markup, parse_mode='Markdown')
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -438,11 +467,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop('state', None)
         await safe_delete_message(query.message)
         return await start(update, context)
-    
-    # 🌟 NEW: INDIVIDUAL KEY DELETION HANDLER 🌟
+
     elif data.startswith('adm_delkey_'):
         key_id_to_del = data.replace('adm_delkey_', '')
-        await query.edit_message_text(f"⏳ Key ID: {key_id_to_del} ကို ဖျက်နေပါသည်...")
+        await query.edit_message_text(f"⏳ ဖျက်နေပါသည်...")
         try:
             client = get_outline_client()
             try: client.delete_key(key_id_to_del)
@@ -452,14 +480,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             c.execute("DELETE FROM plans WHERE key_id = %s", (key_id_to_del,))
             conn.commit()
             conn.close()
-            await query.edit_message_text(f"✅ Key ID: {key_id_to_del} ကို အောင်မြင်စွာ ဖျက်လိုက်ပါပြီ©", reply_markup=BACK_TO_ADMIN_MARKUP)
+            await query.edit_message_text(f"✅ ဤ Key အား အောင်မြင်စွာ ဖျက်လိုက်ပါပြီ။")
         except Exception as e:
-            await query.edit_message_text(f"❌ Error: {e}", reply_markup=BACK_TO_ADMIN_MARKUP)
+            await query.edit_message_text(f"❌ Error: {e}")
 
-    elif data == 'admin_aws_setup':
-        context.user_data['state'] = 'waiting_for_aws_setup'
-        msg = ("☁️ **AWS ချိတ်ဆက်ရန်**\n\nAWS IAM မှ ရရှိသော အချက်အလက်များကို `|` ခံ၍ အောက်ပါအတိုင်း ရိုက်ထည့်ပါ။\n`AccessKey | SecretKey | Region | InstanceName`\n\n📌 ဥပမာ - `AKIA... | wJalrX... | ap-southeast-1 | HHVPN-Server`")
+    elif data == 'admin_change_cost':
+        context.user_data['state'] = 'waiting_for_cost'
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("SELECT value FROM settings WHERE key='monthly_cost'")
+        row = c.fetchone()
+        conn.close()
+        current_cost = int(row[0]) if row else 25000
+        msg = f"💰 **လစဉ်အရင်း ပြင်ရန်**\n\nလက်ရှိ သတ်မှတ်ထားသော လစဉ်အရင်းမှာ **{current_cost:,} ကျပ်** ဖြစ်ပါသည်။\n\nပမာဏအသစ် ပြောင်းလဲသတ်မှတ်လိုပါက အောက်တွင် ဂဏန်းသက်သက်ဖြင့် ရိုက်ထည့်ပါ။\n\n*(ဥပမာ: `30000`)*"
         await query.edit_message_text(text=msg, reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
+
     elif data == 'admin_manual_backup':
         await query.edit_message_text("⏳ Cloud Database အား Backup ယူနေပါသည်... ခဏစောင့်ပါ။")
         try:
@@ -540,6 +575,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             row_gb = c.fetchone()
             total_server_gb = int(row_gb[0]) if row_gb else 2000
             
+            c.execute("SELECT value FROM settings WHERE key='monthly_cost'")
+            row_cost = c.fetchone()
+            monthly_cost = int(row_cost[0]) if row_cost else 25000
+            
             c.execute("SELECT current_used_bytes FROM plans WHERE is_active=1")
             all_active_usage = c.fetchall()
             conn.close()
@@ -550,7 +589,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             current_m, current_y, current_m_num = now.strftime("%Y-%m"), now.strftime("%Y"), now.month
             monthly_rev = sum(PLAN_PRICES.get(p[0], 0) for p in all_plans if p[1][:7] == current_m)
             yearly_rev = sum(PLAN_PRICES.get(p[0], 0) for p in all_plans if p[1][:4] == current_y)
-            monthly_profit, yearly_profit = monthly_rev - 25000, yearly_rev - (25000 * current_m_num)
+            
+            monthly_profit = monthly_rev - monthly_cost
+            yearly_profit = yearly_rev - (monthly_cost * current_m_num)
             def get_status(p): return f"🟢 မြတ် (<b>+{p:,}</b>)" if p > 0 else (f"⚪️ အရင်းကြေ (<b>0</b>)" if p == 0 else f"🔴 ရှုံး (<b>{p:,}</b>)")
             
             try:
@@ -580,8 +621,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             msg = (
                 f"📊 <b>စီးပွားရေးနှင့် Server အခြေအနေ (Stats)</b>\n\n"
-                f"📅 <b>ယခုလစာရင်း ({now.strftime('%B')}):</b>\n▪️ လစဉ် အရင်း: <code>25,000 ကျပ်</code>\n▪️ ယခုလ ဝင်ငွေ: <code>{monthly_rev:,} ကျပ်</code>\n▪️ အခြေအနေ: {get_status(monthly_profit)} ကျပ်\n\n"
-                f"📆 <b>ယခုနှစ်စာရင်း (YTD):</b>\n▪️ နှစ်စဉ် အရင်း: <code>{25000 * current_m_num:,} ကျပ်</code>\n▪️ ယခုနှစ် ဝင်ငွေ: <code>{yearly_rev:,} ကျပ်</code>\n▪️ အခြေအနေ: {get_status(yearly_profit)} ကျပ်\n\n"
+                f"📅 <b>ယခုလစာရင်း ({now.strftime('%B')}):</b>\n▪️ လစဉ် အရင်း: <code>{monthly_cost:,} ကျပ်</code>\n▪️ ယခုလ ဝင်ငွေ: <code>{monthly_rev:,} ကျပ်</code>\n▪️ အခြေအနေ: {get_status(monthly_profit)} ကျပ်\n\n"
+                f"📆 <b>ယခုနှစ်စာရင်း (YTD):</b>\n▪️ နှစ်စဉ် အရင်း: <code>{monthly_cost * current_m_num:,} ကျပ်</code>\n▪️ ယခုနှစ် ဝင်ငွေ: <code>{yearly_rev:,} ကျပ်</code>\n▪️ အခြေအနေ: {get_status(yearly_profit)} ကျပ်\n\n"
                 f"💽 <b>Server Data အခြေအနေ:</b>\n▪️ Active Keys: <code>{active_keys_count} ခု</code>\n▪️ ရောင်းချထားသော Data: <code>{total_allocated_gb:.2f} GB</code>\n▪️ Customer သုံးထားသော Data: <code>{total_used_gb:.2f} GB</code> / <b>{total_server_gb} GB</b>\n\n"
                 f"{kamatera_status_text}\n\n"
                 f"💡 <b>အကြံပြုချက်:</b>\n{srv_status}"
@@ -616,8 +657,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e: 
             return await query.edit_message_text(f"❌ Server Error: {e}", reply_markup=BACK_TO_ADMIN_MARKUP)
             
-        msg = "👥 <b>Active Users List (Real-time)</b>\n\n"
-        kb_keys = []
+        await safe_delete_message(query.message)
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="👥 <b>Active Users List (Real-time)</b>", parse_mode='HTML')
+
         for tid, uname, ptype, edate, kid, dlimit, current_bytes in users_data:
             matched_key = next((k for k in all_keys if str(k.key_id) == str(kid)), None)
             real_used_bytes = int(getattr(matched_key, 'used_bytes', 0) or 0) if matched_key else current_bytes
@@ -628,12 +670,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 data_info = f"📊 Data: <code>{used_gb:.2f}GB / {limit_gb:.2f}GB</code>"
             else: data_info = f"📊 သုံးထားသော Data: <code>{used_gb:.2f}GB</code>"
             
-            msg += f"👤 {get_mention(tid, uname)} (ID: <code>{tid}</code>)\n📦 Plan: <code>{ptype}</code>\n⏳ Exp: <code>{edate or 'No Exp'}</code>\n{data_info}\n---\n"
-            kb_keys.append([InlineKeyboardButton(f"🗑 Delete Key: {kid} ({ptype})", callback_data=f"adm_delkey_{kid}")])
+            user_msg = f"👤 {get_mention(tid, uname)} (ID: <code>{tid}</code>)\n📦 Plan: <code>{ptype}</code>\n⏳ Exp: <code>{edate or 'No Exp'}</code>\n{data_info}"
+            user_kb = [[InlineKeyboardButton(f"🗑 ဤ Key အား ဖျက်မည်", callback_data=f"adm_delkey_{kid}")]]
+            
+            await context.bot.send_message(chat_id=update.effective_chat.id, text=user_msg, reply_markup=InlineKeyboardMarkup(user_kb), parse_mode='HTML')
+            await asyncio.sleep(0.05)
         
-        kb_keys.append([InlineKeyboardButton("🔙 Admin Panel သို့ ပြန်သွားရန်", callback_data='back_to_admin')])
-        if len(msg) > 4000: msg = msg[:4000] + "\n... (စာရင်းများလွန်းသဖြင့် အချို့ကို ဖြတ်ထားပါသည်)"
-        await query.edit_message_text(text=msg, reply_markup=InlineKeyboardMarkup(kb_keys), parse_mode='HTML')
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="👇 အခြားလုပ်ဆောင်ရန်", reply_markup=BACK_TO_ADMIN_MARKUP)
 
     elif data == 'admin_expiring':
         conn = get_db()
@@ -648,10 +691,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text=msg, reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='HTML')
 
     elif data == 'how_to_use':
-        kb = [[InlineKeyboardButton("🤖 Android", callback_data='htu_android'), InlineKeyboardButton("🍎 Apple (iOS)", callback_data='htu_apple')], [InlineKeyboardButton("🔙 Menu သို့ပြန်သွားရန်", callback_data='back_to_main')]]
-        await query.edit_message_text("📱 **မိမိအသုံးပြုမည့် ဖုန်းအမျိုးအစားကို ရွေးချယ်ပါ:**", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
+        kb = [
+            [InlineKeyboardButton("🤖 Android", callback_data='htu_android'), InlineKeyboardButton("🍎 Apple (iOS)", callback_data='htu_apple')],
+            [InlineKeyboardButton("💻 PC (Windows)", callback_data='htu_pc')],
+            [InlineKeyboardButton("🔙 Menu သို့ပြန်သွားရန်", callback_data='back_to_main')]
+        ]
+        await query.edit_message_text("📱 **မိမိအသုံးပြုမည့် Device အမျိုးအစားကို ရွေးချယ်ပါ:**", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
 
-    elif data in ('htu_android', 'htu_apple'): await send_htu_guide(query, context, 'android' if data == 'htu_android' else 'apple')
+    elif data in ('htu_android', 'htu_apple', 'htu_pc'): 
+        await send_htu_guide(query, context, data.replace('htu_', ''))
 
     elif data == 'send_feedback':
         context.user_data['state'] = 'waiting_for_feedback'
@@ -665,7 +713,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try: await context.bot.send_message(admin, f"🌟 <b>New Rating!</b>\n\n👤 User: {get_mention(user_id, username)}\n⭐️ Rating: <b>{rating} Stars</b>", parse_mode='HTML')
             except: pass
 
-    # 🌟 Free Trial callback ကို ပိတ်ထားသည်
     elif data == 'free_trial':
         await query.edit_message_text("⚠️ ယခုအချိန်တွင် Free Trial ဝန်ဆောင်မှုကို ခေတ္တပိတ်ထားပါသည်©", reply_markup=BACK_TO_MAIN_MARKUP)
 
@@ -723,6 +770,23 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if os.path.exists(PAYMENT_QR_PATH):
             with open(PAYMENT_QR_PATH, 'rb') as f: await context.bot.send_photo(user_id, f, reply_markup=BACK_TO_MAIN_MARKUP)
         else: await context.bot.send_message(user_id, "*(⚠️ QR Code မရှိပါ)*", reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
+
+# 🌟 NEW: Admin Document Upload Handler for PC File 🌟
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS: return
+    
+    doc = update.message.document
+    file_id = doc.file_id
+    file_name = doc.file_name
+    
+    conn = get_db()
+    c = conn.cursor()
+    upsert_query = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+    c.execute(upsert_query, ('pc_installer_file_id', file_id))
+    conn.commit()
+    conn.close()
+    
+    await update.message.reply_text(f"✅ PC အတွက် Installer ဖိုင်ကို Telegram တွင် အောင်မြင်စွာ မှတ်သားလိုက်ပါပြီ။\n\n📂 File Name: `{file_name}`\n\nယခုအခါ User များက PC အသုံးပြုပုံကို နှိပ်ပါက ဤဖိုင်ကို တိုက်ရိုက် ပို့ပေးမည် ဖြစ်ပါသည်။", parse_mode='Markdown')
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -891,6 +955,7 @@ def main():
     app.add_handler(CommandHandler("admin", admin_panel))
     app.add_handler(CommandHandler("deluser", delete_user_command)) 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_document)) # 🌟 ADDED DOCUMENT HANDLER 🌟
     app.add_handler(CallbackQueryHandler(fb_approval_handler, pattern="^fb(app|rej)_"))
     app.add_handler(CallbackQueryHandler(admin_approval_handler, pattern="^pay_(app|rej)_"))
     app.add_handler(CallbackQueryHandler(button_handler))
