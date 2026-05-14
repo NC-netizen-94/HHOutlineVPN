@@ -7,6 +7,7 @@ import html
 import urllib.parse
 import json
 import psycopg2
+import sys
 from psycopg2.extras import DictCursor
 from datetime import datetime, timedelta, time, timezone
 from threading import Thread
@@ -47,11 +48,6 @@ BOT_USERNAME = "HHVPN_bot"
 ADMIN_IDS = [1656832105] 
 FB_LINK = "https://www.facebook.com/profile.php?id=100063992047331"
 ADMIN_CONTACT_LINK = "https://t.me/HappyHive9496"
-
-WELCOME_IMAGE_PATH = "welcome.jpg"
-ANDROID_SS_PATH = "android_ss.jpg"  
-APPLE_SS_PATH = "apple_ss.jpg"      
-PAYMENT_QR_PATH = "kpay_qr.jpg"     
 
 PROMO_MSG = "🎁 သတင်းကောင်း!\nTelegram ကနေ သူငယ်ချင်းကို Invite လုပ်ရင် 1GB Free ရမယ်နော်။\n\n👉 အသေးစိတ်ကို Admin ( https://t.me/HappyHive9496 ) ထံ ဆက်သွယ်မေးမြန်းနိုင်ပါတယ်။"
 WELCOME_TEXT = ("🌟 **Welcome to HappyHive VPN!** 🌟\n\n🚀 **ဘာလို့ HappyHive ကို ရွေးချယ်သင့်တာလဲ?**\n🛡️ **Private & Secure:** လူထောင်ချီသုံးနေတဲ့ အခမဲ့ VPN တွေလို မဟုတ်ဘဲ၊ သီးသန့် Private Server ကို အသုံးပြုထားလို့ လိုင်းကျတာ၊ ချိတ်မရတာ လုံးဝမရှိပါဘူး。\n⚡️ **High Speed:** ကမ္ဘာ့အကောင်းဆုံး AWS Server များဖြစ်လို့ ရုပ်ရှင်ကြည့်၊ ဂိမ်းဆော့၊ ဒေါင်းလုဒ်ဆွဲ... အထစ်အငေါ့မရှိ အမြန်နှုန်း အပြည့်ရပါမယ်。\n🔒 **100% Safe:** လူကြီးမင်း၏ ကိုယ်ရေးအချက်အလက်များကို လုံးဝ မှတ်သားထားခြင်း (No Logs) မရှိလို့ ယုံကြည်စိတ်ချစွာ အသုံးပြုနိုင်ပါတယ်။\n\n👇 အောက်ပါ Menu များမှတဆင့် မိမိအသုံးပြုလိုသော ဝန်ဆောင်မှုကို ရွေးချယ်ပါ ခင်ဗျာ©")
@@ -100,10 +96,13 @@ def init_db():
     except psycopg2.Error: pass
     try: c.execute("ALTER TABLE plans ADD COLUMN expired_at TEXT")
     except psycopg2.Error: pass
+    try: c.execute("ALTER TABLE plans ADD COLUMN previous_used_bytes BIGINT DEFAULT 0")
+    except psycopg2.Error: pass
 
     c.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''')
     upsert_query = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
     
+    # API & CERT
     NEW_API_URL = 'https://194.36.88.172:11236/jAycy_SJSIk2zYta6jSWNA'
     NEW_CERT = '360A41E53BD63C2E143362F2D1AF255A690BA7958D17504389898D4938AED744'
 
@@ -229,7 +228,7 @@ def generate_vpn_key(telegram_id, plan_type, data_gb=None, months=None):
         try: client.add_data_limit(new_key.key_id, int(data_bytes))
         except Exception as e: logging.error(f"Failed to set data limit on outline server: {e}")
 
-    c.execute('''INSERT INTO plans (telegram_id, key_id, plan_type, data_limit, start_date, end_date, is_active, username, current_used_bytes) VALUES (%s, %s, %s, %s, %s, %s, 1, %s, 0)''', (telegram_id, new_key.key_id, plan_type, data_bytes, db_start_date, db_end_date, raw_username))
+    c.execute('''INSERT INTO plans (telegram_id, key_id, plan_type, data_limit, start_date, end_date, is_active, username, current_used_bytes, previous_used_bytes) VALUES (%s, %s, %s, %s, %s, %s, 1, %s, 0, 0)''', (telegram_id, new_key.key_id, plan_type, data_bytes, db_start_date, db_end_date, raw_username))
     conn.close()
     final_url = f"{new_key.access_url.split('#')[0]}#{urllib.parse.quote(suffix)}"
     return final_url, suffix
@@ -249,18 +248,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("🛒 Plan ဝယ်ရန်", callback_data='buy_plan')],
         [InlineKeyboardButton("👤 Plan/Data စစ်ရန်", callback_data='my_plan'), InlineKeyboardButton("❓ အသုံးပြုပုံ", callback_data='how_to_use')],
-        [InlineKeyboardButton("📢 သူငယ်ချင်းကို မျှဝေပီး 1GB free ယူရန်", callback_data='share_referral')],
+        [InlineKeyboardButton("📢 သူငယ်ချင်းများသို့ မျှဝေရန်", callback_data='share_referral')],
         [InlineKeyboardButton("📝 အကြံပြုစာရေးရန်", callback_data='send_feedback'), InlineKeyboardButton("🌐 Facebook Page", url=FB_LINK)],
         [InlineKeyboardButton("👨‍💻 Admin ကို ဆက်သွယ်ရန်", url=ADMIN_CONTACT_LINK)]
     ]
     chat_id = update.effective_chat.id
     markup = InlineKeyboardMarkup(keyboard)
 
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT value FROM settings WHERE key='welcome_image_id'")
+    row = c.fetchone()
+    conn.close()
+
     if update.message and update.message.text.startswith('/start'):
         await update.message.reply_text("👇 အောက်ပါ ခလုတ်များကိုလည်း အလွယ်တကူ အသုံးပြုနိုင်ပါသည်။", reply_markup=get_bottom_keyboard(user.id))
-        if os.path.exists(WELCOME_IMAGE_PATH):
-            try:
-                with open(WELCOME_IMAGE_PATH, 'rb') as f: await context.bot.send_photo(chat_id=chat_id, photo=f)
+        if row:
+            try: await context.bot.send_photo(chat_id=chat_id, photo=row[0])
             except Exception as e: logging.error(e)
         await context.bot.send_message(chat_id=chat_id, text=WELCOME_TEXT, reply_markup=markup, parse_mode='Markdown')
     else:
@@ -276,9 +280,11 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("👥 View Users Plans", callback_data='admin_view_users'), InlineKeyboardButton("⚠️ Expiring Soon", callback_data='admin_expiring')],
         [InlineKeyboardButton("➕ Manual Key ထုတ်ရန်", callback_data='admin_manual_key'), InlineKeyboardButton("📝 Plan အမည်များ ပြင်ရန်", callback_data='admin_edit_plans')],
-        [InlineKeyboardButton("📊 စီးပွားရေးနှင့် Server အခြေအနေ", callback_data='admin_server_stats'), InlineKeyboardButton("💽 Server Storage ပြင်ရန်", callback_data='admin_change_storage')],
+        [InlineKeyboardButton("🔄 User Key ပြောင်းရန်", callback_data='admin_change_key'), InlineKeyboardButton("📂 ဖိုင်နှင့် ပုံများ တင်ရန်", callback_data='admin_uploads_menu')],
+        [InlineKeyboardButton("📊 စီးပွားရေး/Server Stats", callback_data='admin_server_stats'), InlineKeyboardButton("💽 Server Storage ပြင်ရန်", callback_data='admin_change_storage')],
         [InlineKeyboardButton("💰 လစဉ်အရင်း ပြင်ရန်", callback_data='admin_change_cost'), InlineKeyboardButton("💾 Database Backup ယူရန်", callback_data='admin_manual_backup')],
-        [InlineKeyboardButton("📢 Broadcast", callback_data='admin_broadcast'), InlineKeyboardButton("🗑️ စနစ်တစ်ခုလုံး Reset ချရန်", callback_data='admin_reset_system')]
+        [InlineKeyboardButton("📢 Broadcast", callback_data='admin_broadcast'), InlineKeyboardButton("🔄 Script Update", callback_data='admin_script_update')],
+        [InlineKeyboardButton("🗑️ စနစ်တစ်ခုလုံး Reset ချရန်", callback_data='admin_reset_system')]
     ]
     msg = "🛡️ **Admin Panel ရောက်ပါပြီ။**\n👇 လုပ်ဆောင်လိုသော မီနူးကို ရွေးချယ်ပါ။"
     if update.message: await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
@@ -323,6 +329,56 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except: pass
             await send_auto_backup(context, target_id, uname, "Plan (Manual) ချပေး")
         except Exception as e: await update.message.reply_text(f"❌ Error: {e}")
+
+    elif state == 'waiting_for_change_key' and update.effective_user.id in ADMIN_IDS:
+        try: target_id = int(text.strip())
+        except ValueError: return await update.message.reply_text("❌ Telegram ID သည် ဂဏန်းသာ ဖြစ်ရပါမည်။", reply_markup=BACK_TO_ADMIN_MARKUP)
+        
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("SELECT id, key_id, plan_type, data_limit, current_used_bytes, previous_used_bytes, username, start_date, end_date FROM plans WHERE telegram_id=%s AND is_active=1", (target_id,))
+        plan = c.fetchone()
+        if not plan:
+            conn.close()
+            return await update.message.reply_text("❌ ဤ User တွင် Active ဖြစ်နေသော Plan မရှိပါ။", reply_markup=BACK_TO_ADMIN_MARKUP)
+        
+        pid, old_kid, ptype, dlimit, c_bytes, prev_bytes, uname, sdate, edate = plan
+        
+        try:
+            client = get_outline_client()
+            all_keys = client.get_keys()
+            matched_key = next((k for k in all_keys if str(k.key_id) == str(old_kid)), None)
+            real_c_bytes = int(getattr(matched_key, 'used_bytes', 0) or 0) if matched_key else c_bytes
+        except Exception as e:
+            conn.close()
+            return await update.message.reply_text(f"❌ Outline Server Error: {e}", reply_markup=BACK_TO_ADMIN_MARKUP)
+            
+        total_used_so_far = (prev_bytes or 0) + real_c_bytes
+        
+        try: client.delete_key(old_kid)
+        except: pass
+        
+        new_key = client.create_key()
+        suffix = f"{ptype}_{sdate[:10]}_{edate[:10] if edate else 'NoExp'}_{target_id}_Key{new_key.key_id}"
+        client.rename_key(new_key.key_id, suffix)
+        
+        if dlimit:
+            rem_bytes = max(0, dlimit - total_used_so_far)
+            try: client.add_data_limit(new_key.key_id, int(rem_bytes))
+            except: pass
+            
+        c.execute("UPDATE plans SET key_id=%s, previous_used_bytes=%s, current_used_bytes=0 WHERE id=%s", (new_key.key_id, total_used_so_far, pid))
+        conn.commit()
+        conn.close()
+        
+        final_url = f"{new_key.access_url.split('#')[0]}#{urllib.parse.quote(suffix)}"
+        del context.user_data['state']
+        await update.message.reply_text(f"✅ Key ပြောင်းလဲခြင်း အောင်မြင်ပါပြီ။\n\nNew Key: `{final_url}`", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
+        
+        try:
+            user_msg = f"⚠️ **အသိပေးချက် (Server Update)**\n\nဆာဗာပြုပြင်မှုကြောင့် လူကြီးမင်း၏ Key အား အသစ်ပြောင်းလဲပေးလိုက်ပါသည်။ (Data မှတ်တမ်းများ ပျောက်ပျက်သွားမည် မဟုတ်ပါ။)\n\n👇 **အောက်ပါ Key အသစ်ကို အသုံးပြုပေးပါခင်ဗျာ။**\n\n`{final_url}`"
+            await context.bot.send_message(chat_id=target_id, text=user_msg, parse_mode='Markdown')
+        except: pass
 
     elif state == 'waiting_for_storage_gb' and update.effective_user.id in ADMIN_IDS:
         try:
@@ -412,43 +468,52 @@ async def send_htu_guide(query, context, os_type):
     user_id = query.from_user.id
     await safe_delete_message(query.message)
     
+    conn = get_db()
+    c = conn.cursor()
+    
     if os_type == 'android': 
+        c.execute("SELECT value FROM settings WHERE key='android_guide_file_id'")
+        row = c.fetchone()
+        file_id = row[0] if row else None
+        
         text = "🤖 **Android ဖုန်းများအတွက် အသုံးပြုပုံ**\n\nအောက်ပါပုံတွင် ကြည့်ရှုနိုင်ပါသည်။"
-        img_path = ANDROID_SS_PATH
         url = "https://play.google.com/store/apps/details?id=org.outline.android.client&hl=en_SG"
         markup = InlineKeyboardMarkup([[InlineKeyboardButton("📥 Outline App Download ဆွဲရန်", url=url)], [InlineKeyboardButton("🔙 Menu သို့ပြန်သွားရန်", callback_data='back_to_main')]])
-        await context.bot.send_message(chat_id=user_id, text=text, parse_mode='Markdown')
-        if os.path.exists(img_path):
-            with open(img_path, 'rb') as f: await context.bot.send_photo(chat_id=user_id, photo=f, caption="App ကို Download ဆွဲယူရန် အောက်ပါ Menu ကိုနှိပ်ပါ။ 👇", reply_markup=markup, parse_mode='Markdown')
-        else: await context.bot.send_message(chat_id=user_id, text="App ကို Download ဆွဲယူရန် အောက်ပါ Menu ကိုနှိပ်ပါ။ 👇", reply_markup=markup, parse_mode='Markdown')
+        
+        if file_id:
+            await context.bot.send_photo(chat_id=user_id, photo=file_id, caption=text, reply_markup=markup, parse_mode='Markdown')
+        else:
+            await context.bot.send_message(chat_id=user_id, text=text + "\n*(⚠️ ပုံမရှိသေးပါ။ Admin မှ Bot ထဲသို့ ပုံအရင်တင်ပေးရန် လိုအပ်ပါသည်။)*", reply_markup=markup, parse_mode='Markdown')
         
     elif os_type == 'apple': 
+        c.execute("SELECT value FROM settings WHERE key='ios_guide_file_id'")
+        row = c.fetchone()
+        file_id = row[0] if row else None
+        
         text = "🍎 **Apple (iOS) ဖုန်းများအတွက် အသုံးပြုပုံ**\n\nအောက်ပါပုံတွင် ကြည့်ရှုနိုင်ပါသည်။"
-        img_path = APPLE_SS_PATH
         url = "https://apps.apple.com/us/app/outline-app/id1356177741"
         markup = InlineKeyboardMarkup([[InlineKeyboardButton("📥 Outline App Download ဆွဲရန်", url=url)], [InlineKeyboardButton("🔙 Menu သို့ပြန်သွားရန်", callback_data='back_to_main')]])
-        await context.bot.send_message(chat_id=user_id, text=text, parse_mode='Markdown')
-        if os.path.exists(img_path):
-            with open(img_path, 'rb') as f: await context.bot.send_photo(chat_id=user_id, photo=f, caption="App ကို Download ဆွဲယူရန် အောက်ပါ Menu ကိုနှိပ်ပါ။ 👇", reply_markup=markup, parse_mode='Markdown')
-        else: await context.bot.send_message(chat_id=user_id, text="App ကို Download ဆွဲယူရန် အောက်ပါ Menu ကိုနှိပ်ပါ။ 👇", reply_markup=markup, parse_mode='Markdown')
         
-    # 🌟 NEW: PC FILE ID LOGIC 🌟
+        if file_id:
+            await context.bot.send_photo(chat_id=user_id, photo=file_id, caption=text, reply_markup=markup, parse_mode='Markdown')
+        else:
+            await context.bot.send_message(chat_id=user_id, text=text + "\n*(⚠️ ပုံမရှိသေးပါ။ Admin မှ Bot ထဲသို့ ပုံအရင်တင်ပေးရန် လိုအပ်ပါသည်။)*", reply_markup=markup, parse_mode='Markdown')
+        
     elif os_type == 'pc':
+        c.execute("SELECT value FROM settings WHERE key='pc_installer_file_id'")
+        row = c.fetchone()
+        file_id = row[0] if row else None
+        
         text = "💻 **PC (Windows) အတွက် အသုံးပြုပုံ**\n\nအောက်ပါဖိုင်ကို Download ဆွဲပြီး Install လုပ်ပါ။ ပြီးလျှင် Admin ပေးသော Key ကို ထည့်သွင်းအသုံးပြုနိုင်ပါသည်။"
         markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu သို့ပြန်သွားရန်", callback_data='back_to_main')]])
         await context.bot.send_message(chat_id=user_id, text=text, parse_mode='Markdown')
         
-        conn = get_db()
-        c = conn.cursor()
-        c.execute("SELECT value FROM settings WHERE key='pc_installer_file_id'")
-        row = c.fetchone()
-        conn.close()
-        
-        if row:
-            file_id = row[0]
+        if file_id:
             await context.bot.send_document(chat_id=user_id, document=file_id, caption="📥 PC Outline Client (Windows)", reply_markup=markup)
         else:
             await context.bot.send_message(chat_id=user_id, text="*(⚠️ PC အတွက် Installer ဖိုင် မရှိသေးပါ။ Admin မှ Bot ထဲသို့ ဖိုင်အရင် ပို့ပေးရန် လိုအပ်ပါသည်။)*", reply_markup=markup, parse_mode='Markdown')
+    
+    conn.close()
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -467,6 +532,28 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop('state', None)
         await safe_delete_message(query.message)
         return await start(update, context)
+
+    elif data == 'admin_uploads_menu':
+        kb = [
+            [InlineKeyboardButton("🖼️ Android ပုံတင်ရန်", callback_data='up_android'), InlineKeyboardButton("🖼️ iOS ပုံတင်ရန်", callback_data='up_ios')],
+            [InlineKeyboardButton("💻 PC Installer တင်ရန်", callback_data='up_pc'), InlineKeyboardButton("🌟 Welcome ပုံတင်ရန်", callback_data='up_welcome')],
+            [InlineKeyboardButton("🔙 Admin Panel သို့ ပြန်သွားရန်", callback_data='back_to_admin')]
+        ]
+        await query.edit_message_text("📂 **တင်လိုသော ဖိုင် သို့မဟုတ် ပုံ ကိုရွေးချယ်ပါ:**", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
+
+    elif data in ['up_android', 'up_ios', 'up_welcome', 'up_pc']:
+        context.user_data['state'] = f'wait_{data}'
+        msg = "📸 ယခု ပုံကို Bot ထဲသို့ တိုက်ရိုက် လှမ်းပို့ပေးပါ။" if data != 'up_pc' else "📁 ယခု PC Installer (.exe) ဖိုင်ကို Bot ထဲသို့ တိုက်ရိုက် လှမ်းပို့ပေးပါ။"
+        await query.edit_message_text(msg, reply_markup=BACK_TO_ADMIN_MARKUP)
+
+    elif data == 'admin_change_key':
+        context.user_data['state'] = 'waiting_for_change_key'
+        await query.edit_message_text("🔄 **User Key ပြောင်းရန်**\n\nKey အသစ်ပြောင်းလိုသော User ၏ Telegram ID ကို ရိုက်ထည့်ပါ:", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
+
+    elif data == 'admin_script_update':
+        context.user_data['state'] = 'waiting_for_script_update'
+        msg = "🔄 **Script Update ပြုလုပ်ရန်**\n\n`HHVPN_bot.py` (သို့မဟုတ်) Python Script အသစ်ကို ယခု Bot ထဲသို့ လှမ်းပို့ပေးပါ။"
+        await query.edit_message_text(msg, reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
 
     elif data.startswith('adm_delkey_'):
         key_id_to_del = data.replace('adm_delkey_', '')
@@ -579,11 +666,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             row_cost = c.fetchone()
             monthly_cost = int(row_cost[0]) if row_cost else 25000
             
-            c.execute("SELECT current_used_bytes FROM plans WHERE is_active=1")
+            c.execute("SELECT current_used_bytes, previous_used_bytes FROM plans WHERE is_active=1")
             all_active_usage = c.fetchall()
             conn.close()
             
-            total_used_gb = sum((r[0] or 0) for r in all_active_usage) / 1e9
+            total_used_gb = sum((r[0] or 0) + (r[1] or 0) for r in all_active_usage) / 1e9
             PLAN_PRICES = {'30GB': 2000, '50GB': 3000, '100GB': 4000}
             now = datetime.now(timezone.utc)
             current_m, current_y, current_m_num = now.strftime("%Y-%m"), now.strftime("%Y"), now.month
@@ -646,7 +733,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("⏳ Data များကို Outline Server မှ တိုက်ရိုက်ဆွဲယူနေပါသည်...")
         conn = get_db()
         c = conn.cursor()
-        c.execute("SELECT u.telegram_id, u.username, p.plan_type, p.end_date, p.key_id, p.data_limit, p.current_used_bytes FROM plans p JOIN users u ON p.telegram_id = u.telegram_id WHERE p.is_active=1")
+        c.execute("SELECT u.telegram_id, u.username, p.plan_type, p.end_date, p.key_id, p.data_limit, p.current_used_bytes, p.previous_used_bytes FROM plans p JOIN users u ON p.telegram_id = u.telegram_id WHERE p.is_active=1")
         users_data = c.fetchall()
         conn.close()
         
@@ -660,17 +747,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_delete_message(query.message)
         await context.bot.send_message(chat_id=update.effective_chat.id, text="👥 <b>Active Users List (Real-time)</b>", parse_mode='HTML')
 
-        for tid, uname, ptype, edate, kid, dlimit, current_bytes in users_data:
+        for tid, uname, ptype, edate, kid, dlimit, current_bytes, prev_bytes in users_data:
             matched_key = next((k for k in all_keys if str(k.key_id) == str(kid)), None)
+            
+            final_url = f"{matched_key.access_url.split('#')[0]}#{urllib.parse.quote(matched_key.name or f'Key_{kid}')}" if matched_key else "Key Not Found on Server"
+
             real_used_bytes = int(getattr(matched_key, 'used_bytes', 0) or 0) if matched_key else current_bytes
-            used_gb = real_used_bytes / 1e9
+            total_used_bytes = real_used_bytes + (prev_bytes or 0)
+            used_gb = total_used_bytes / 1e9
             
             if dlimit:
                 limit_gb = dlimit / 1e9
                 data_info = f"📊 Data: <code>{used_gb:.2f}GB / {limit_gb:.2f}GB</code>"
             else: data_info = f"📊 သုံးထားသော Data: <code>{used_gb:.2f}GB</code>"
             
-            user_msg = f"👤 {get_mention(tid, uname)} (ID: <code>{tid}</code>)\n📦 Plan: <code>{ptype}</code>\n⏳ Exp: <code>{edate or 'No Exp'}</code>\n{data_info}"
+            user_msg = f"👤 {get_mention(tid, uname)} (ID: <code>{tid}</code>)\n📦 Plan: <code>{ptype}</code>\n⏳ Exp: <code>{edate or 'No Exp'}</code>\n{data_info}\n🔑 Key: <code>{final_url}</code>"
             user_kb = [[InlineKeyboardButton(f"🗑 ဤ Key အား ဖျက်မည်", callback_data=f"adm_delkey_{kid}")]]
             
             await context.bot.send_message(chat_id=update.effective_chat.id, text=user_msg, reply_markup=InlineKeyboardMarkup(user_kb), parse_mode='HTML')
@@ -725,7 +816,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("⏳ အချက်အလက်များကို Outline Server မှ တိုက်ရိုက်ရှာဖွေနေပါသည်...")
         conn = get_db()
         c = conn.cursor()
-        c.execute("SELECT plan_type, data_limit, start_date, end_date, current_used_bytes, is_active, expired_at, key_id FROM plans WHERE telegram_id=%s AND is_active IN (0, 1)", (user_id,))
+        c.execute("SELECT plan_type, data_limit, start_date, end_date, current_used_bytes, is_active, expired_at, key_id, previous_used_bytes FROM plans WHERE telegram_id=%s AND is_active IN (0, 1)", (user_id,))
         user_plans = c.fetchall()
         conn.close()
         
@@ -737,14 +828,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await query.edit_message_text(f"❌ Server Error: Outline Server နှင့် ချိတ်ဆက်၍မရပါ။ ({e})", reply_markup=BACK_TO_MAIN_MARKUP)
 
         msg = "👤 **လက်ရှိ Plan နှင့် မှတ်တမ်းများ**\n\n"
-        for ptype, dlimit, sdate, edate, current_bytes, is_active, exp_at, kid in user_plans:
+        for ptype, dlimit, sdate, edate, current_bytes, is_active, exp_at, kid, prev_bytes in user_plans:
             real_used_bytes = 0
             if is_active == 1:
                 matched_key = next((k for k in all_keys if str(k.key_id) == str(kid)), None)
                 real_used_bytes = int(getattr(matched_key, 'used_bytes', 0) or 0) if matched_key else current_bytes
             else: real_used_bytes = current_bytes
 
-            used_gb = real_used_bytes / 1e9
+            total_used_bytes = real_used_bytes + (prev_bytes or 0)
+            used_gb = total_used_bytes / 1e9
             disp_plan = next((details['display'] for key, details in plans_dict.items() if details['plan_type'] == ptype), ptype)
             
             if is_active == 1: status_text = "🟢 **Active (အသုံးပြုနေဆဲ)**"
@@ -771,26 +863,52 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             with open(PAYMENT_QR_PATH, 'rb') as f: await context.bot.send_photo(user_id, f, reply_markup=BACK_TO_MAIN_MARKUP)
         else: await context.bot.send_message(user_id, "*(⚠️ QR Code မရှိပါ)*", reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
 
-# 🌟 NEW: Admin Document Upload Handler for PC File 🌟
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS: return
     
     doc = update.message.document
-    file_id = doc.file_id
-    file_name = doc.file_name
+    state = context.user_data.get('state')
     
-    conn = get_db()
-    c = conn.cursor()
-    upsert_query = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
-    c.execute(upsert_query, ('pc_installer_file_id', file_id))
-    conn.commit()
-    conn.close()
-    
-    await update.message.reply_text(f"✅ PC အတွက် Installer ဖိုင်ကို Telegram တွင် အောင်မြင်စွာ မှတ်သားလိုက်ပါပြီ။\n\n📂 File Name: `{file_name}`\n\nယခုအခါ User များက PC အသုံးပြုပုံကို နှိပ်ပါက ဤဖိုင်ကို တိုက်ရိုက် ပို့ပေးမည် ဖြစ်ပါသည်။", parse_mode='Markdown')
+    if state == 'waiting_for_script_update':
+        if doc.file_name.endswith('.py'):
+            file = await context.bot.get_file(doc.file_id)
+            current_file_path = os.path.abspath(__file__)
+            await file.download_to_drive(current_file_path)
+            await update.message.reply_text("✅ Script အသစ်ကို အောင်မြင်စွာ Update လုပ်ပြီးပါပြီ။\n\n🔄 Bot အား ယခုချက်ချင်း Auto Restart ချနေပါသည်...", parse_mode='Markdown')
+            os.execv(sys.executable, ['python'] + sys.argv)
+        else:
+            await update.message.reply_text("❌ Python (.py) ဖိုင်သာ လက်ခံပါသည်။")
+        return
+        
+    if state == 'wait_up_pc':
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", ('pc_installer_file_id', doc.file_id))
+        conn.commit()
+        conn.close()
+        del context.user_data['state']
+        await update.message.reply_text(f"✅ PC အတွက် Installer ဖိုင်ကို အောင်မြင်စွာ မှတ်သားလိုက်ပါပြီ။\n\n📂 File Name: `{doc.file_name}`", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
+        return
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_name = get_user_display_name(update.effective_user)
+    state = context.user_data.get('state')
+    
+    if state in ['wait_up_android', 'wait_up_ios', 'wait_up_welcome']:
+        photo_id = update.message.photo[-1].file_id
+        db_key = 'android_guide_file_id' if state == 'wait_up_android' else ('ios_guide_file_id' if state == 'wait_up_ios' else 'welcome_image_id')
+        name_mm = "Android Guide" if state == 'wait_up_android' else ("iOS Guide" if state == 'wait_up_ios' else "Welcome")
+        
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (db_key, photo_id))
+        conn.commit()
+        conn.close()
+        
+        del context.user_data['state']
+        return await update.message.reply_text(f"✅ {name_mm} ပုံကို အောင်မြင်စွာ မှတ်သားလိုက်ပါပြီ။", reply_markup=BACK_TO_ADMIN_MARKUP)
+
     if 'pending_plan' in context.user_data:
         plan = context.user_data.pop('pending_plan')
         action_type = context.user_data.pop('action_type', 'buy')
@@ -892,7 +1010,7 @@ async def check_expired_keys(context: ContextTypes.DEFAULT_TYPE):
     conn = get_db()
     c = conn.cursor()
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    c.execute("SELECT p.key_id, p.telegram_id, p.plan_type, u.username, p.end_date, p.data_limit FROM plans p JOIN users u ON p.telegram_id = u.telegram_id WHERE p.is_active = 1")
+    c.execute("SELECT p.key_id, p.telegram_id, p.plan_type, u.username, p.end_date, p.data_limit, p.previous_used_bytes FROM plans p JOIN users u ON p.telegram_id = u.telegram_id WHERE p.is_active = 1")
     active_plans = c.fetchall()
     if active_plans:
         try:
@@ -902,9 +1020,9 @@ async def check_expired_keys(context: ContextTypes.DEFAULT_TYPE):
         except:
             conn.close()
             return
-        for kid, tid, ptype, uname, end_date, dlimit in active_plans:
+        for kid, tid, ptype, uname, end_date, dlimit, prev_bytes in active_plans:
             is_expired_time = end_date and end_date <= now_str
-            total_used = usage_dict.get(str(kid), 0)
+            total_used = usage_dict.get(str(kid), 0) + (prev_bytes or 0)
             is_expired_data = dlimit and total_used >= dlimit
             if is_expired_time or is_expired_data:
                 try: client.delete_key(kid)
@@ -951,16 +1069,18 @@ def main():
         app.job_queue.run_repeating(send_kamatera_traffic_report, interval=43200, first=30)
         mmt_tz = timezone(timedelta(hours=6, minutes=30))
         app.job_queue.run_daily(send_daily_report, time=time(hour=8, minute=30, tzinfo=mmt_tz))
+    
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("admin", admin_panel))
     app.add_handler(CommandHandler("deluser", delete_user_command)) 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-    app.add_handler(MessageHandler(filters.Document.ALL, handle_document)) # 🌟 ADDED DOCUMENT HANDLER 🌟
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_document)) 
     app.add_handler(CallbackQueryHandler(fb_approval_handler, pattern="^fb(app|rej)_"))
     app.add_handler(CallbackQueryHandler(admin_approval_handler, pattern="^pay_(app|rej)_"))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_error_handler(error_handler)
+    
     print("✅ Bot is running successfully...")
     app.run_polling()
 
