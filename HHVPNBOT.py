@@ -446,38 +446,6 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         del context.user_data['state']
         await context.bot.send_message(chat_id=update.effective_user.id, text=f"✅ **Broadcast ပေးပို့ခြင်း ပြီးဆုံးပါပြီ©**\n\n🟢 အောင်မြင်: `{success}` ဦး\n🔴 မအောင်မြင်: `{failed}` ဦး", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
 
-# 🌟 NEW: Restore Command 🌟
-async def restore_data_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS: return
-    await update.message.reply_text("⏳ Data များ ပြန်လည်သွင်းနေပါသည်...")
-    
-    users_data = [
-        {"id": 1648867714, "name": "@CamelliaBlossom123", "plan": "30GB", "key_id": "3", "start": "2026-05-02 07:13:12", "exp": "2026-06-01 07:13:12"},
-        {"id": 7545066157, "name": "Myat Thuzar", "plan": "30GB", "key_id": "6", "start": "2026-05-12 06:25:58", "exp": "2026-06-11 06:25:58"},
-        {"id": 1652674399, "name": "@mingochen", "plan": "30GB", "key_id": "4", "start": "2026-05-09 08:31:41", "exp": "2026-06-08 08:31:41"},
-        {"id": 1656832105, "name": "@HappyHive9496", "plan": "30GB", "key_id": "8", "start": "2026-05-02 05:56:48", "exp": "2026-06-01 05:56:48"}
-    ]
-    
-    try:
-        conn = get_db()
-        c = conn.cursor()
-        data_limit_bytes = int(30 * 1e9)
-        
-        for u in users_data:
-            uid = str(uuid.uuid4())[:8].upper()
-            c.execute("INSERT INTO users (telegram_id, unique_id, is_trial_used, username, referral_reward_claimed, has_rated) VALUES (%s, %s, 0, %s, 0, 0) ON CONFLICT (telegram_id) DO NOTHING", (u["id"], uid, u["name"]))
-            c.execute("DELETE FROM plans WHERE key_id=%s", (u["key_id"],))
-            # previous_used_bytes နှင့် current_used_bytes ကို 0 ဟု သတ်မှတ်ထားသဖြင့် Outline Server မှ Data Usage ကိုသာ Live ဆွဲယူပါမည်။
-            c.execute('''INSERT INTO plans (telegram_id, key_id, plan_type, data_limit, start_date, end_date, is_active, username, current_used_bytes, previous_used_bytes) 
-                         VALUES (%s, %s, %s, %s, %s, %s, 1, %s, 0, 0)''', 
-                      (u["id"], u["key_id"], u["plan"], data_limit_bytes, u["start"], u["exp"], u["name"]))
-            
-        conn.commit()
-        conn.close()
-        await update.message.reply_text("✅ User (၄) ဦး၏ မှတ်တမ်းများကို Database သို့ ပြန်ထည့်ပြီးပါပြီ။\nData Usage များကို Outline Server မှ တိုက်ရိုက်ဆွဲယူပါမည်။")
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error restoring data: {e}")
-
 async def delete_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS: return
     if len(context.args) != 1: return await update.message.reply_text("❌ အသုံးပြုပုံ မှားယွင်းနေပါသည်။\nဥပမာ - `/deluser 123456789`", parse_mode='Markdown')
@@ -501,6 +469,37 @@ async def delete_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     conn.close()
     if deleted_plans > 0 or deleted_users > 0: await update.message.reply_text(f"✅ User ID `{target_id}` အား ဖျက်ပစ်လိုက်ပါပြီ©", parse_mode='Markdown')
     else: await update.message.reply_text(f"⚠️ User ID `{target_id}` ကို မတွေ့ပါ။", parse_mode='Markdown')
+
+# 🌟 NEW: Restore Command 🌟
+async def restore_data_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS: return
+    await update.message.reply_text("⏳ Data များ ပြန်လည်သွင်းနေပါသည်...")
+    
+    users_data = [
+        {"id": 1648867714, "name": "@CamelliaBlossom123", "plan": "30GB", "key_id": "3", "start": "2026-05-02 07:13:12", "exp": "2026-06-01 07:13:12"},
+        {"id": 7545066157, "name": "Myat Thuzar", "plan": "30GB", "key_id": "6", "start": "2026-05-12 06:25:58", "exp": "2026-06-11 06:25:58"},
+        {"id": 1652674399, "name": "@mingochen", "plan": "30GB", "key_id": "4", "start": "2026-05-09 08:31:41", "exp": "2026-06-08 08:31:41"},
+        {"id": 1656832105, "name": "@HappyHive9496", "plan": "30GB", "key_id": "8", "start": "2026-05-02 05:56:48", "exp": "2026-06-01 05:56:48"}
+    ]
+    
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        data_limit_bytes = int(30 * 1e9)
+        
+        for u in users_data:
+            uid = str(uuid.uuid4())[:8].upper()
+            c.execute("INSERT INTO users (telegram_id, unique_id, is_trial_used, username, referral_reward_claimed, has_rated) VALUES (%s, %s, 0, %s, 0, 0) ON CONFLICT (telegram_id) DO NOTHING", (u["id"], uid, u["name"]))
+            c.execute("DELETE FROM plans WHERE key_id=%s", (u["key_id"],))
+            c.execute('''INSERT INTO plans (telegram_id, key_id, plan_type, data_limit, start_date, end_date, is_active, username, current_used_bytes, previous_used_bytes) 
+                         VALUES (%s, %s, %s, %s, %s, %s, 1, %s, 0, 0)''', 
+                      (u["id"], u["key_id"], u["plan"], data_limit_bytes, u["start"], u["exp"], u["name"]))
+            
+        conn.commit()
+        conn.close()
+        await update.message.reply_text("✅ User (၄) ဦး၏ မှတ်တမ်းများကို Database သို့ ပြန်ထည့်ပြီးပါပြီ။\nData Usage များကို Outline Server မှ တိုက်ရိုက်ဆွဲယူပါမည်။")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error restoring data: {e}")
 
 async def send_rating_request(context: ContextTypes.DEFAULT_TYPE):
     user_id = context.job.data
@@ -694,6 +693,54 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await asyncio.sleep(0.05)
         await context.bot.send_message(chat_id=update.effective_chat.id, text="👇 အခြားလုပ်ဆောင်ရန်", reply_markup=BACK_TO_ADMIN_MARKUP)
 
+    elif data == 'admin_broadcast':
+        context.user_data['state'] = 'waiting_for_broadcast'
+        await query.edit_message_text("📢 **Broadcast စာတိုပေးပို့ရန်**\n\nUser များအားလုံးထံသို့ ပေးပို့လိုသော စာသားကို ရိုက်ထည့်ပါ:", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
+
+    elif data == 'admin_reset_system':
+        msg = "⚠️ **သတိပေးချက် (System Reset)** ⚠️\n\nယခုလုပ်ဆောင်ချက်သည် စမ်းသပ်ထားသော User များ၊ Plan များ၊ ငွေကြေးမှတ်တမ်းများအားလုံးကို Database မှ အပြီးတိုင် ဖျက်ပစ်မည်ဖြစ်ပြီး၊ Outline Server ပေါ်ရှိ သက်ဆိုင်ရာ Key များကိုပါ ဖျက်ပစ်မည် ဖြစ်ပါသည်။\n\n**တကယ် Reset ချမှာ သေချာပြီလား?**"
+        kb = [[InlineKeyboardButton("✅ သေချာပါသည် (Reset All)", callback_data='confirm_reset_all')], [InlineKeyboardButton("❌ မလုပ်တော့ပါ (Cancel)", callback_data='back_to_admin')]]
+        await query.edit_message_text(text=msg, reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
+
+    elif data == 'confirm_reset_all':
+        await query.edit_message_text("⏳ စနစ်တစ်ခုလုံးကို ရှင်းလင်းနေပါသည်... ခဏစောင့်ပါ။")
+        try:
+            conn = get_db()
+            c = conn.cursor()
+            c.execute("SELECT key_id FROM plans")
+            all_keys = c.fetchall()
+            if all_keys:
+                client = get_outline_client()
+                for kid in all_keys:
+                    try: client.delete_key(kid[0])
+                    except: pass
+            c.execute("TRUNCATE TABLE plans, users RESTART IDENTITY CASCADE")
+            conn.close()
+            await query.edit_message_text("✅ **စနစ်တစ်ခုလုံးကို အောင်မြင်စွာ Reset ချလိုက်ပါပြီ©**", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
+        except Exception as e: await query.edit_message_text(f"❌ Error ဖြစ်နေပါသည်: {e}", reply_markup=BACK_TO_ADMIN_MARKUP)
+
+    elif data == 'admin_manual_key':
+        context.user_data['state'] = 'waiting_for_manual_key'
+        plan_list = "\n".join([f"▪️ `{k}` - {v['short_name']}" for k, v in plans_dict.items()])
+        msg = f"🔑 **Manual Key ထုတ်ရန်**\n\nအောက်ပါအတိုင်း `|` ခံ၍ ရိုက်ထည့်ပါ။\n`Telegram ID | User Name | Plan Key`\n\n📌 ဥပမာ - `09123456789 | Kyaw Kyaw | plan_50gb`\n\n📋 **ရရှိနိုင်သော Plans:**\n{plan_list}"
+        await query.edit_message_text(text=msg, reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
+
+    elif data == 'admin_edit_plans':
+        kb = [[InlineKeyboardButton(p_info['short_name'], callback_data=f"editplan_{p_key}")] for p_key, p_info in plans_dict.items()]
+        kb.append([InlineKeyboardButton("🔙 Admin Panel သို့ ပြန်သွားရန်", callback_data='back_to_admin')])
+        await query.edit_message_text("📝 **နာမည်ပြောင်းလိုသော Plan ကို ရွေးချယ်ပါ:**", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
+
+    elif data.startswith('editplan_'):
+        plan_key = data.replace('editplan_', '')
+        context.user_data['state'] = f'waiting_for_plan_name_{plan_key}'
+        msg = f"✏️ ရွေးချယ်ထားသော Plan: `{plans_dict.get(plan_key, {}).get('short_name', plan_key)}`\n\n**Plan အမည်သစ်ကို | ခံ၍ ရိုက်ထည့်ပါ။**\n`Short Name | Display Name`"
+        await query.edit_message_text(msg, reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
+
+    elif data == 'send_feedback':
+        context.user_data['state'] = 'waiting_for_feedback'
+        await safe_delete_message(query.message)
+        await context.bot.send_message(user_id, "📝 **အကြံပြုစာရေးရန်**\n\nအကြံပြုချက်များကို အောက်တွင် စာရိုက်၍ ပေးပို့နိုင်ပါသည်။", reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
+
     elif data == 'how_to_use':
         kb = [[InlineKeyboardButton("🤖 Android", callback_data='htu_android'), InlineKeyboardButton("🍎 Apple (iOS)", callback_data='htu_apple')], [InlineKeyboardButton("💻 PC (Windows)", callback_data='htu_pc')], [InlineKeyboardButton("🔙 Menu သို့ပြန်သွားရန်", callback_data='back_to_main')]]
         await query.edit_message_text("📱 **မိမိအသုံးပြုမည့် Device ကို ရွေးချယ်ပါ:**", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
@@ -790,7 +837,7 @@ def main():
     # Handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("admin", admin_panel))
-    app.add_handler(CommandHandler("restore", restore_data_command)) # 🌟 Restore Command 🌟
+    app.add_handler(CommandHandler("restore", restore_data_command)) 
     app.add_handler(CommandHandler("deluser", delete_user_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
