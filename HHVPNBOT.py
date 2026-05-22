@@ -446,6 +446,38 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         del context.user_data['state']
         await context.bot.send_message(chat_id=update.effective_user.id, text=f"✅ **Broadcast ပေးပို့ခြင်း ပြီးဆုံးပါပြီ©**\n\n🟢 အောင်မြင်: `{success}` ဦး\n🔴 မအောင်မြင်: `{failed}` ဦး", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
 
+# 🌟 NEW: Restore Command 🌟
+async def restore_data_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS: return
+    await update.message.reply_text("⏳ Data များ ပြန်လည်သွင်းနေပါသည်...")
+    
+    users_data = [
+        {"id": 1648867714, "name": "@CamelliaBlossom123", "plan": "30GB", "key_id": "3", "start": "2026-05-02 07:13:12", "exp": "2026-06-01 07:13:12"},
+        {"id": 7545066157, "name": "Myat Thuzar", "plan": "30GB", "key_id": "6", "start": "2026-05-12 06:25:58", "exp": "2026-06-11 06:25:58"},
+        {"id": 1652674399, "name": "@mingochen", "plan": "30GB", "key_id": "4", "start": "2026-05-09 08:31:41", "exp": "2026-06-08 08:31:41"},
+        {"id": 1656832105, "name": "@HappyHive9496", "plan": "30GB", "key_id": "8", "start": "2026-05-02 05:56:48", "exp": "2026-06-01 05:56:48"}
+    ]
+    
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        data_limit_bytes = int(30 * 1e9)
+        
+        for u in users_data:
+            uid = str(uuid.uuid4())[:8].upper()
+            c.execute("INSERT INTO users (telegram_id, unique_id, is_trial_used, username, referral_reward_claimed, has_rated) VALUES (%s, %s, 0, %s, 0, 0) ON CONFLICT (telegram_id) DO NOTHING", (u["id"], uid, u["name"]))
+            c.execute("DELETE FROM plans WHERE key_id=%s", (u["key_id"],))
+            # previous_used_bytes နှင့် current_used_bytes ကို 0 ဟု သတ်မှတ်ထားသဖြင့် Outline Server မှ Data Usage ကိုသာ Live ဆွဲယူပါမည်။
+            c.execute('''INSERT INTO plans (telegram_id, key_id, plan_type, data_limit, start_date, end_date, is_active, username, current_used_bytes, previous_used_bytes) 
+                         VALUES (%s, %s, %s, %s, %s, %s, 1, %s, 0, 0)''', 
+                      (u["id"], u["key_id"], u["plan"], data_limit_bytes, u["start"], u["exp"], u["name"]))
+            
+        conn.commit()
+        conn.close()
+        await update.message.reply_text("✅ User (၄) ဦး၏ မှတ်တမ်းများကို Database သို့ ပြန်ထည့်ပြီးပါပြီ။\nData Usage များကို Outline Server မှ တိုက်ရိုက်ဆွဲယူပါမည်။")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error restoring data: {e}")
+
 async def delete_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS: return
     if len(context.args) != 1: return await update.message.reply_text("❌ အသုံးပြုပုံ မှားယွင်းနေပါသည်။\nဥပမာ - `/deluser 123456789`", parse_mode='Markdown')
@@ -694,8 +726,6 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS: return
     doc = update.message.document; state = context.user_data.get('state')
     
-    # 🌟 NEW: Update ဖိုင်တင်ရုံဖြင့် Restart မကျဘဲ အစားထိုးခြင်း (Manual Replace version အတွက်)
-    # (မှတ်ချက် - Restart မကျစေလိုပါက os.execv အပိုင်းကို Comment ပိတ်နိုင်ပါသည်)
     if state == 'wait_up_pc':
         conn = get_db(); c = conn.cursor(); c.execute("INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", ('pc_installer_file_id', doc.file_id)); conn.commit(); conn.close()
         await update.message.reply_text(f"✅ PC Installer သိမ်းပြီးပါပြီ©", reply_markup=BACK_TO_ADMIN_MARKUP)
@@ -710,7 +740,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn = get_db(); c = conn.cursor(); c.execute("INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (db_key, photo_id)); conn.commit(); conn.close()
         del context.user_data['state']; await update.message.reply_text("✅ ပုံသိမ်းပြီးပါပြီ©", reply_markup=BACK_TO_ADMIN_MARKUP)
     else:
-        # Payment Logic
         for admin in ADMIN_IDS:
             try: await context.bot.send_photo(admin, photo=photo_id, caption=f"🔔 <b>New Payment!</b>\n👤 User: {update.effective_user.first_name}\nID: <code>{user_id}</code>", parse_mode='HTML')
             except: pass
@@ -757,13 +786,19 @@ def main():
     keep_alive(); app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
     if app.job_queue:
         app.job_queue.run_repeating(check_expired_keys, interval=60, first=10)
-    app.add_handler(CommandHandler("start", start)); app.add_handler(CommandHandler("admin", admin_panel))
+    
+    # Handlers
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("admin", admin_panel))
+    app.add_handler(CommandHandler("restore", restore_data_command)) # 🌟 Restore Command 🌟
     app.add_handler(CommandHandler("deluser", delete_user_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(CallbackQueryHandler(fb_approval_handler, pattern="^fb(app|rej)_"))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    print("✅ Bot is running successfully..."); app.run_polling()
+    
+    print("✅ Bot is running successfully...")
+    app.run_polling()
 
 if __name__ == '__main__': main()
