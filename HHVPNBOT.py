@@ -277,7 +277,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS: return
-    # 🌟 Update ခလုတ်ကို ဖယ်ရှားထားပါသည်
     keyboard = [
         [InlineKeyboardButton("👥 View Users Plans", callback_data='admin_view_users'), InlineKeyboardButton("⚠️ Expiring Soon", callback_data='admin_expiring')],
         [InlineKeyboardButton("➕ Manual Key ထုတ်ရန်", callback_data='admin_manual_key'), InlineKeyboardButton("📝 Plan အမည်များ ပြင်ရန်", callback_data='admin_edit_plans')],
@@ -765,7 +764,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             msg += f"\n🛑 **ရပ်စဲသည့်အချိန်:** `{exp_at}`\n---\n" if is_active == 0 and exp_at else "\n---\n"
         await query.edit_message_text(text=msg, reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
 
+    # 🌟 RESTORED: User Selects Plan -> Save State 🌟
     elif data in plans_dict:
+        context.user_data['pending_plan'] = data
+        context.user_data['action_type'] = 'buy'
         await safe_delete_message(query.message)
         await context.bot.send_message(user_id, "💰 **KPay သို့ ငွေလွှဲပါ**\n👤 Name: `U Aung Pyae`\n📞 `09952130817`\n📝 Note: `shopping`\n\n📸 **ငွေလွှဲပြေစာ (Screenshot)** ကို ပို့ပေးပါ။", parse_mode='Markdown')
 
@@ -786,11 +788,75 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db_key = 'android_guide_file_id' if state == 'wait_up_android' else ('ios_guide_file_id' if state == 'wait_up_ios' else 'welcome_image_id')
         conn = get_db(); c = conn.cursor(); c.execute("INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (db_key, photo_id)); conn.commit(); conn.close()
         del context.user_data['state']; await update.message.reply_text("✅ ပုံသိမ်းပြီးပါပြီ©", reply_markup=BACK_TO_ADMIN_MARKUP)
-    else:
+    # 🌟 RESTORED: User Submits Receipt -> Send Approve/Reject to Admin 🌟
+    elif 'pending_plan' in context.user_data:
+        plan = context.user_data.pop('pending_plan')
+        action_type = context.user_data.pop('action_type', 'buy')
+        user_name = get_user_display_name(update.effective_user)
+        disp = get_plan_details().get(plan, {}).get('short_name', plan)
+        
+        payment_id = str(uuid.uuid4())[:8]
+        if 'payments' not in context.bot_data: context.bot_data['payments'] = {}
+        context.bot_data['payments'][payment_id] = {'user_id': user_id, 'plan_key': plan, 'action_type': action_type, 'user_name': user_name, 'msgs': []}
+        kb = [[InlineKeyboardButton("✅ Approve & Send Key", callback_data=f"pay_app_{payment_id}")], [InlineKeyboardButton("❌ Reject", callback_data=f"pay_rej_{payment_id}")]]
+        
         for admin in ADMIN_IDS:
-            try: await context.bot.send_photo(admin, photo=photo_id, caption=f"🔔 <b>New Payment!</b>\n👤 User: {update.effective_user.first_name}\nID: <code>{user_id}</code>", parse_mode='HTML')
+            try: 
+                msg = await context.bot.send_photo(admin, photo=photo_id, caption=f"🔔 <b>New Payment!</b>\n\n👤 User: {get_mention(user_id, user_name)}\n📦 Plan: <code>{disp}</code>", reply_markup=InlineKeyboardMarkup(kb), parse_mode='HTML')
+                context.bot_data['payments'][payment_id]['msgs'].append((admin, msg.message_id))
             except: pass
-        await update.message.reply_text("✅ ပြေစာအား Admin ထံ ပို့ပြီးပါပြီ©")
+        await update.message.reply_text("✅ ငွေလွှဲပြေစာကို Admin ထံ ပို့ဆောင်ပြီးပါပြီ©")
+    else:
+        await update.message.reply_text("⚠️ ကျေးဇူးပြု၍ Plan အရင်ရွေးချယ်ပြီးမှ Screenshot ပို့ပေးပါ။")
+
+# 🌟 RESTORED: Admin Approval Logic (Approve/Reject + Auto Key Send) 🌟
+async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not query.data.startswith("pay_"): return
+    parts = query.data.split("_")
+    action_code, payment_id = parts[1], parts[2]
+    payment_info = context.bot_data.get('payments', {}).get(payment_id)
+    
+    if not payment_info:
+        try: await query.edit_message_caption(caption=f"{query.message.caption_html}\n\n⚠️ <b>ဤပြေစာကို လုပ်ဆောင်ပြီးဖြစ်ပါသည်။</b>", parse_mode='HTML')
+        except: pass
+        return
+        
+    target_user_id, plan_key, target_uname, msgs_to_edit = payment_info['user_id'], payment_info['plan_key'], payment_info['user_name'], payment_info['msgs']
+    del context.bot_data['payments'][payment_id]
+    
+    status_text = f"✅ Approved" if action_code == 'app' else f"❌ Rejected"
+    for adm_id, msg_id in msgs_to_edit:
+        try: await context.bot.edit_message_caption(chat_id=adm_id, message_id=msg_id, caption=f"{query.message.caption_html}\n\n--- <b>{status_text}</b> ---", parse_mode='HTML')
+        except: pass
+        
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT has_rated FROM users WHERE telegram_id=%s", (target_user_id,))
+    row = c.fetchone()
+    has_rated = row[0] if row else 0
+    
+    if action_code == "app":
+        plan_info = get_plan_details().get(plan_key)
+        if not plan_info: return conn.close()
+        try:
+            access_url, key_name = generate_vpn_key(target_user_id, plan_info['plan_type'], plan_info['data_gb'], plan_info['months'])
+            await context.bot.send_message(target_user_id, f"🎉 **ငွေသွင်းမှု အတည်ပြုပြီးပါပြီ©**\n\n👤 **Name:** `{key_name}`\n\n👇 **အောက်ပါ Key ကို Copy ကူးပြီး Outline VPN တွင် ထည့်သွင်းအသုံးပြုနိုင်ပါပြီ©**", parse_mode='Markdown')
+            await context.bot.send_message(target_user_id, f"`{access_url}`", parse_mode='Markdown')
+            await context.bot.send_message(target_user_id, PROMO_MSG, reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
+            if has_rated == 0:
+                if context.job_queue: context.job_queue.run_once(send_rating_request, 3600, data=target_user_id)
+                c.execute("UPDATE users SET has_rated=1 WHERE telegram_id=%s", (target_user_id,))
+            await send_auto_backup(context, target_user_id, target_uname, "Plan အသစ် ချပေး")
+        except Exception as e: 
+            for admin in ADMIN_IDS:
+                try: await context.bot.send_message(admin, f"❌ Error: {e}")
+                except: pass
+    elif action_code == "rej":
+        await context.bot.send_message(target_user_id, "❌ **ငွေသွင်းမှု မအောင်မြင်ပါ။**\n\nငွေသွင်းပြေစာ မှားယွင်းနေပါသည်။", reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
+    conn.commit()
+    conn.close()
 
 async def fb_approval_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query; await query.answer(); data = query.data
@@ -842,6 +908,8 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(CallbackQueryHandler(fb_approval_handler, pattern="^fb(app|rej)_"))
+    # 🌟 RESTORED: Admin Approval Callback Handler 🌟
+    app.add_handler(CallbackQueryHandler(admin_approval_handler, pattern="^pay_(app|rej)_"))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     
