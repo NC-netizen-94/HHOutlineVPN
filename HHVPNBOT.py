@@ -116,9 +116,12 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS plan_configs (plan_key TEXT PRIMARY KEY, short_name TEXT, display_name TEXT, plan_type TEXT, data_gb INT, months INT)''')
     c.execute("DELETE FROM plan_configs")
     default_plans = [
-        ('plan_30gb', '30GB Plan', '30GB (၁လ) - ၂၀၀၀ကျပ်', '30GB', 30, 1),
-        ('plan_50gb', '50GB Plan', '50GB (၁လ) - ၃၀၀၀ကျပ်', '50GB', 50, 1),
-        ('plan_100gb', '100GB Plan', '100GB (၁လ) - ၄၀၀၀ကျပ်', '100GB', 100, 1)
+        ('unlim_1m_1d', '1M (1 Device)', 'Unlimited - 1 month (1 device) - 5000ks', 'Unlimited', None, 1),
+        ('unlim_1m_2d', '1M (2 Devices)', 'Unlimited - 1 month (2 devices) - 6000ks', 'Unlimited', None, 1),
+        ('unlim_1m_4d', '1M (4 Devices)', 'Unlimited - 1 month (4 devices) - 8000ks', 'Unlimited', None, 1),
+        ('unlim_3m_1d', '3M (1 Device)', 'Unlimited - 3 months (1 device) - 13000ks', 'Unlimited', None, 3),
+        ('unlim_3m_2d', '3M (2 Devices)', 'Unlimited - 3 months (2 devices) - 16000ks', 'Unlimited', None, 3),
+        ('unlim_3m_4d', '3M (4 Devices)', 'Unlimited - 3 months (4 devices) - 22000ks', 'Unlimited', None, 3)
     ]
     for p in default_plans:
         c.execute("INSERT INTO plan_configs VALUES (%s, %s, %s, %s, %s, %s)", p)
@@ -444,6 +447,47 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except: failed += 1
         del context.user_data['state']
         await context.bot.send_message(chat_id=update.effective_user.id, text=f"✅ **Broadcast ပေးပို့ခြင်း ပြီးဆုံးပါပြီ©**\n\n🟢 အောင်မြင်: `{success}` ဦး\n🔴 မအောင်မြင်: `{failed}` ဦး", reply_markup=BACK_TO_ADMIN_MARKUP, parse_mode='Markdown')
+
+    elif state and state.startswith('wait_ext_key_') and update.effective_user.id in ADMIN_IDS:
+        payment_id = state.replace('wait_ext_key_', '')
+        payment_info = context.bot_data.get('payments', {}).get(payment_id)
+        
+        if not payment_info:
+            del context.user_data['state']
+            return await update.message.reply_text("❌ Payment အချက်အလက် ရှာမတွေ့တော့ပါ။")
+
+        target_user_id, plan_key, target_uname, msgs_to_edit = payment_info['user_id'], payment_info['plan_key'], payment_info['user_name'], payment_info['msgs']
+        provided_key = text.strip()
+
+        del context.user_data['state']
+        del context.bot_data['payments'][payment_id]
+
+        for adm_id, msg_id in msgs_to_edit:
+            try: await context.bot.edit_message_caption(chat_id=adm_id, message_id=msg_id, caption=f"✅ <b>Approved & Key Sent:</b>\n<code>{html.escape(provided_key)}</code>", parse_mode='HTML')
+            except: pass
+
+        try:
+            await context.bot.send_message(target_user_id, f"🎉 **ငွေသွင်းမှု အတည်ပြုပြီးပါပြီ©**\n\n👇 **အောက်ပါ Key ကို Copy ကူးပြီး Outline VPN တွင် ထည့်သွင်းအသုံးပြုနိုင်ပါပြီ©**\n\n`{provided_key}`", parse_mode='Markdown')
+        except: pass
+
+        conn = get_db()
+        c = conn.cursor()
+        plan_info = get_plan_details().get(plan_key)
+        if plan_info:
+            start_date = datetime.now()
+            db_start_date = start_date.strftime("%Y-%m-%d %H:%M:%S")
+            months = plan_info['months']
+            end_date = start_date + timedelta(days=30 * months) if months else None
+            db_end_date = end_date.strftime("%Y-%m-%d %H:%M:%S") if end_date else None
+            data_bytes = plan_info['data_gb'] * 1e9 if plan_info['data_gb'] else None
+            fake_key_id = f"ext_{uuid.uuid4().hex[:8]}" 
+
+            c.execute('''INSERT INTO plans (telegram_id, key_id, plan_type, data_limit, start_date, end_date, is_active, username, current_used_bytes, previous_used_bytes) VALUES (%s, %s, %s, %s, %s, %s, 1, %s, 0, 0)''', (target_user_id, fake_key_id, plan_info['plan_type'], data_bytes, db_start_date, db_end_date, target_uname))
+
+        conn.commit()
+        conn.close()
+        await send_auto_backup(context, target_user_id, target_uname, "Plan (External Key) ချပေး")
+        await update.message.reply_text("✅ User ထံသို့ Key အောင်မြင်စွာ ပေးပို့ပြီး မှတ်တမ်းတင်လိုက်ပါပြီ။", reply_markup=BACK_TO_ADMIN_MARKUP)
 
 async def delete_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS: return
@@ -809,7 +853,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("⚠️ ကျေးဇူးပြု၍ Plan အရင်ရွေးချယ်ပြီးမှ Screenshot ပို့ပေးပါ။")
 
-# 🌟 RESTORED: Admin Approval Logic (Approve/Reject + Auto Key Send) 🌟
 async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -824,39 +867,20 @@ async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_T
         return
         
     target_user_id, plan_key, target_uname, msgs_to_edit = payment_info['user_id'], payment_info['plan_key'], payment_info['user_name'], payment_info['msgs']
-    del context.bot_data['payments'][payment_id]
-    
-    status_text = f"✅ Approved" if action_code == 'app' else f"❌ Rejected"
-    for adm_id, msg_id in msgs_to_edit:
-        try: await context.bot.edit_message_caption(chat_id=adm_id, message_id=msg_id, caption=f"{query.message.caption_html}\n\n--- <b>{status_text}</b> ---", parse_mode='HTML')
-        except: pass
-        
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("SELECT has_rated FROM users WHERE telegram_id=%s", (target_user_id,))
-    row = c.fetchone()
-    has_rated = row[0] if row else 0
     
     if action_code == "app":
-        plan_info = get_plan_details().get(plan_key)
-        if not plan_info: return conn.close()
-        try:
-            access_url, key_name = generate_vpn_key(target_user_id, plan_info['plan_type'], plan_info['data_gb'], plan_info['months'])
-            await context.bot.send_message(target_user_id, f"🎉 **ငွေသွင်းမှု အတည်ပြုပြီးပါပြီ©**\n\n👤 **Name:** `{key_name}`\n\n👇 **အောက်ပါ Key ကို Copy ကူးပြီး Outline VPN တွင် ထည့်သွင်းအသုံးပြုနိုင်ပါပြီ©**", parse_mode='Markdown')
-            await context.bot.send_message(target_user_id, f"`{access_url}`", parse_mode='Markdown')
-            await context.bot.send_message(target_user_id, PROMO_MSG, reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
-            if has_rated == 0:
-                if context.job_queue: context.job_queue.run_once(send_rating_request, 3600, data=target_user_id)
-                c.execute("UPDATE users SET has_rated=1 WHERE telegram_id=%s", (target_user_id,))
-            await send_auto_backup(context, target_user_id, target_uname, "Plan အသစ် ချပေး")
-        except Exception as e: 
-            for admin in ADMIN_IDS:
-                try: await context.bot.send_message(admin, f"❌ Error: {e}")
-                except: pass
+        context.user_data['state'] = f"wait_ext_key_{payment_id}"
+        for adm_id, msg_id in msgs_to_edit:
+            try: await context.bot.edit_message_caption(chat_id=adm_id, message_id=msg_id, caption=f"{query.message.caption_html}\n\n⏳ <b>Key ရိုက်ထည့်ရန် စောင့်ဆိုင်းနေပါသည်...</b>\n👇 ယခု User အတွက် ပေးလိုသော External Access URL (Key) ကို အောက်တွင် စာရိုက်၍ ပို့ပေးပါ။", parse_mode='HTML')
+            except: pass
+        return 
+        
     elif action_code == "rej":
+        del context.bot_data['payments'][payment_id]
+        for adm_id, msg_id in msgs_to_edit:
+            try: await context.bot.edit_message_caption(chat_id=adm_id, message_id=msg_id, caption=f"{query.message.caption_html}\n\n--- <b>❌ Rejected</b> ---", parse_mode='HTML')
+            except: pass
         await context.bot.send_message(target_user_id, "❌ **ငွေသွင်းမှု မအောင်မြင်ပါ။**\n\nငွေသွင်းပြေစာ မှားယွင်းနေပါသည်။", reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
-    conn.commit()
-    conn.close()
 
 async def fb_approval_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query; await query.answer(); data = query.data
