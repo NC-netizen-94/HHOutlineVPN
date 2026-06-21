@@ -32,6 +32,10 @@ def get_db():
     conn.autocommit = True
     return conn
 
+# 🌟 မြန်မာစံတော်ချိန် (MMT) ရယူရန် 🌟
+def get_mmt_now():
+    return datetime.now(timezone.utc) + timedelta(hours=6, minutes=30)
+
 app_web = Flask('')
 @app_web.route('/')
 def home(): return "Bot is Alive & Cloud DB is Active!"
@@ -98,6 +102,8 @@ def init_db():
     except psycopg2.Error: pass
     try: c.execute("ALTER TABLE plans ADD COLUMN previous_used_bytes BIGINT DEFAULT 0")
     except psycopg2.Error: pass
+    try: c.execute("ALTER TABLE plans ADD COLUMN external_key TEXT") 
+    except psycopg2.Error: pass
 
     c.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''')
     upsert_query = "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
@@ -116,12 +122,12 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS plan_configs (plan_key TEXT PRIMARY KEY, short_name TEXT, display_name TEXT, plan_type TEXT, data_gb INT, months INT)''')
     c.execute("DELETE FROM plan_configs")
     default_plans = [
-        ('unlim_1m_1d', '1M (1 Device)', 'Unlimited - 1 month (1 device) - 5000ks', 'Unlimited', None, 1),
-        ('unlim_1m_2d', '1M (2 Devices)', 'Unlimited - 1 month (2 devices) - 6000ks', 'Unlimited', None, 1),
-        ('unlim_1m_4d', '1M (4 Devices)', 'Unlimited - 1 month (4 devices) - 8000ks', 'Unlimited', None, 1),
-        ('unlim_3m_1d', '3M (1 Device)', 'Unlimited - 3 months (1 device) - 13000ks', 'Unlimited', None, 3),
-        ('unlim_3m_2d', '3M (2 Devices)', 'Unlimited - 3 months (2 devices) - 16000ks', 'Unlimited', None, 3),
-        ('unlim_3m_4d', '3M (4 Devices)', 'Unlimited - 3 months (4 devices) - 22000ks', 'Unlimited', None, 3)
+        ('unlim_1m_1d', '1M (1 Device)', 'Unlimited - 1 month (1 device) - 6000ks', 'Unlimited', None, 1),
+        ('unlim_1m_2d', '1M (2 Devices)', 'Unlimited - 1 month (2 devices) - 7000ks', 'Unlimited', None, 1),
+        ('unlim_1m_4d', '1M (4 Devices)', 'Unlimited - 1 month (4 devices) - 9000ks', 'Unlimited', None, 1),
+        ('unlim_3m_1d', '3M (1 Device)', 'Unlimited - 3 months (1 device) - 16000ks', 'Unlimited', None, 3),
+        ('unlim_3m_2d', '3M (2 Devices)', 'Unlimited - 3 months (2 devices) - 19000ks', 'Unlimited', None, 3),
+        ('unlim_3m_4d', '3M (4 Devices)', 'Unlimited - 3 months (4 devices) - 25000ks', 'Unlimited', None, 3)
     ]
     for p in default_plans:
         c.execute("INSERT INTO plan_configs VALUES (%s, %s, %s, %s, %s, %s)", p)
@@ -216,7 +222,7 @@ def generate_vpn_key(telegram_id, plan_type, data_gb=None, months=None):
     unique_id, raw_username = row[0], row[1] if row[1] else "User"
     
     new_key = client.create_key()
-    start_date = datetime.now()
+    start_date = get_mmt_now()
     db_start_date = start_date.strftime("%Y-%m-%d %H:%M:%S")
     end_date = start_date + timedelta(days=5) if plan_type == "FreeTrial" else (start_date + timedelta(days=30 * months) if months else None)
     db_end_date = end_date.strftime("%Y-%m-%d %H:%M:%S") if end_date else None
@@ -466,7 +472,6 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try: await context.bot.edit_message_caption(chat_id=adm_id, message_id=msg_id, caption=f"✅ <b>Approved & Key Sent:</b>\n<code>{html.escape(provided_key)}</code>", parse_mode='HTML')
             except: pass
 
-        # 2. User ထံသို့ Key ပေးပို့ခြင်း (သီးသန့်ခွဲပို့ခြင်း)
         try:
             await context.bot.send_message(target_user_id, f"🎉 **ငွေသွင်းမှု အတည်ပြုပြီးပါပြီ©**\n\n👇 **အောက်ပါ Key ကို Copy ကူးပြီး Outline VPN တွင် ထည့်သွင်းအသုံးပြုနိုင်ပါပြီ©**", parse_mode='Markdown')
             await context.bot.send_message(target_user_id, f"`{provided_key}`", parse_mode='Markdown')
@@ -476,7 +481,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         c = conn.cursor()
         plan_info = get_plan_details().get(plan_key)
         if plan_info:
-            start_date = datetime.now()
+            start_date = get_mmt_now()
             db_start_date = start_date.strftime("%Y-%m-%d %H:%M:%S")
             months = plan_info['months']
             end_date = start_date + timedelta(days=30 * months) if months else None
@@ -484,7 +489,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             data_bytes = plan_info['data_gb'] * 1e9 if plan_info['data_gb'] else None
             fake_key_id = f"ext_{uuid.uuid4().hex[:8]}" 
 
-            c.execute('''INSERT INTO plans (telegram_id, key_id, plan_type, data_limit, start_date, end_date, is_active, username, current_used_bytes, previous_used_bytes) VALUES (%s, %s, %s, %s, %s, %s, 1, %s, 0, 0)''', (target_user_id, fake_key_id, plan_info['plan_type'], data_bytes, db_start_date, db_end_date, target_uname))
+            c.execute('''INSERT INTO plans (telegram_id, key_id, plan_type, data_limit, start_date, end_date, is_active, username, current_used_bytes, previous_used_bytes, external_key) VALUES (%s, %s, %s, %s, %s, %s, 1, %s, 0, 0, %s)''', (target_user_id, fake_key_id, plan_info['plan_type'], data_bytes, db_start_date, db_end_date, target_uname, provided_key))
 
         conn.commit()
         conn.close()
@@ -504,8 +509,9 @@ async def delete_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         try:
             client = get_outline_client()
             for p in user_plans:
-                try: client.delete_key(p[0])
-                except: pass
+                if not str(p[0]).startswith('ext_'):
+                    try: client.delete_key(p[0])
+                    except: pass
         except: pass
     c.execute("DELETE FROM plans WHERE telegram_id=%s", (target_id,))
     deleted_plans = c.rowcount
@@ -515,7 +521,6 @@ async def delete_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     if deleted_plans > 0 or deleted_users > 0: await update.message.reply_text(f"✅ User ID `{target_id}` အား ဖျက်ပစ်လိုက်ပါပြီ©", parse_mode='Markdown')
     else: await update.message.reply_text(f"⚠️ User ID `{target_id}` ကို မတွေ့ပါ။", parse_mode='Markdown')
 
-# 🌟 NEW: Restore Command 🌟
 async def restore_data_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS: return
     await update.message.reply_text("⏳ Data များ ပြန်လည်သွင်းနေပါသည်...")
@@ -631,9 +636,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         key_id_to_del = data.replace('adm_delkey_', '')
         await query.edit_message_text(f"⏳ ဖျက်နေပါသည်...")
         try:
-            client = get_outline_client()
-            try: client.delete_key(key_id_to_del)
-            except: pass
+            if not key_id_to_del.startswith('ext_'):
+                client = get_outline_client()
+                try: client.delete_key(key_id_to_del)
+                except: pass
             conn = get_db()
             c = conn.cursor()
             c.execute("DELETE FROM plans WHERE key_id = %s", (key_id_to_del,))
@@ -656,7 +662,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for t in ['users', 'plans', 'settings', 'plan_configs']:
                 c.execute(f"SELECT * FROM {t}"); rows = c.fetchall(); backup_data[t] = [dict(r) for r in rows]
             conn.close()
-            filename = f"HHVPN_Backup_{datetime.now().strftime('%Y%m%d_%H%M')}.json"
+            filename = f"HHVPN_Backup_{get_mmt_now().strftime('%Y%m%d_%H%M')}.json"
             with open(filename, 'w', encoding='utf-8') as f: json.dump(backup_data, f, ensure_ascii=False, indent=4)
             with open(filename, 'rb') as f: await context.bot.send_document(chat_id=user_id, document=f, caption="📦 Cloud Backup")
             os.remove(filename)
@@ -692,7 +698,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             total_used_gb = sum((r[0] or 0) + (r[1] or 0) for r in usage_rows) / 1e9
             PLAN_PRICES = {'30GB': 2000, '50GB': 3000, '100GB': 4000}
-            now = datetime.now(timezone.utc); current_m, current_y, current_m_num = now.strftime("%Y-%m"), now.strftime("%Y"), now.month
+            now = get_mmt_now(); current_m, current_y, current_m_num = now.strftime("%Y-%m"), now.strftime("%Y"), now.month
             monthly_rev = sum(PLAN_PRICES.get(p[0], 0) for p in all_plans if p[1][:7] == current_m)
             yearly_rev = sum(PLAN_PRICES.get(p[0], 0) for p in all_plans if p[1][:4] == current_y)
             monthly_profit = monthly_rev - monthly_cost
@@ -720,7 +726,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == 'admin_view_users':
         await query.edit_message_text("⏳ Data ဆွဲယူနေပါသည်...")
         conn = get_db(); c = conn.cursor()
-        c.execute("SELECT u.telegram_id, u.username, p.plan_type, p.end_date, p.key_id, p.data_limit, p.current_used_bytes, p.previous_used_bytes FROM plans p JOIN users u ON p.telegram_id = u.telegram_id WHERE p.is_active=1")
+        c.execute("SELECT u.telegram_id, u.username, p.plan_type, p.end_date, p.key_id, p.data_limit, p.current_used_bytes, p.previous_used_bytes, p.external_key FROM plans p JOIN users u ON p.telegram_id = u.telegram_id WHERE p.is_active=1")
         users_data = c.fetchall(); conn.close()
         if not users_data: return await query.edit_message_text("Active User မရှိပါ။", reply_markup=BACK_TO_ADMIN_MARKUP)
         try: client = get_outline_client(); all_keys = client.get_keys()
@@ -728,10 +734,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await safe_delete_message(query.message)
         await context.bot.send_message(chat_id=update.effective_chat.id, text="👥 <b>Active Users List (Real-time)</b>", parse_mode='HTML')
-        for tid, uname, ptype, edate, kid, dlimit, current_bytes, prev_bytes in users_data:
-            matched_key = next((k for k in all_keys if str(k.key_id) == str(kid)), None)
-            final_url = f"{matched_key.access_url.split('#')[0]}#{urllib.parse.quote(matched_key.name or f'Key_{kid}')}" if matched_key else "Key Not Found"
-            total_used_bytes = (int(getattr(matched_key, 'used_bytes', 0) or 0) if matched_key else current_bytes) + (prev_bytes or 0)
+        for tid, uname, ptype, edate, kid, dlimit, current_bytes, prev_bytes, ext_key in users_data:
+            if str(kid).startswith('ext_'):
+                final_url = ext_key if ext_key else "Key မမှတ်မိသေးပါ (Record အဟောင်း)"
+                total_used_bytes = current_bytes + (prev_bytes or 0)
+            else:
+                matched_key = next((k for k in all_keys if str(k.key_id) == str(kid)), None)
+                final_url = f"{matched_key.access_url.split('#')[0]}#{urllib.parse.quote(matched_key.name or f'Key_{kid}')}" if matched_key else "Key Not Found"
+                total_used_bytes = (int(getattr(matched_key, 'used_bytes', 0) or 0) if matched_key else current_bytes) + (prev_bytes or 0)
+                
             data_info = f"📊 Data: <code>{total_used_bytes/1e9:.2f}GB / {dlimit/1e9:.2f}GB</code>" if dlimit else f"📊 Data: <code>{total_used_bytes/1e9:.2f}GB</code>"
             user_msg = f"👤 {get_mention(tid, uname)} (ID: <code>{tid}</code>)\n📦 Plan: <code>{ptype}</code>\n⏳ Exp: <code>{edate or 'No Exp'}</code>\n{data_info}\n🔑 Key: <code>{final_url}</code>"
             await context.bot.send_message(chat_id=update.effective_chat.id, text=user_msg, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(f"🗑 ဤ Key အား ဖျက်မည်", callback_data=f"adm_delkey_{kid}")]]), parse_mode='HTML')
@@ -797,20 +808,29 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     elif data == 'my_plan':
         await query.edit_message_text("⏳ ရှာဖွေနေပါသည်...")
-        conn = get_db(); c = conn.cursor(); c.execute("SELECT plan_type, data_limit, start_date, end_date, current_used_bytes, is_active, expired_at, key_id, previous_used_bytes FROM plans WHERE telegram_id=%s AND is_active IN (0, 1)", (user_id,)); user_plans = c.fetchall(); conn.close()
+        conn = get_db(); c = conn.cursor()
+        c.execute("SELECT plan_type, data_limit, start_date, end_date, current_used_bytes, is_active, expired_at, key_id, previous_used_bytes, external_key FROM plans WHERE telegram_id=%s AND is_active IN (0, 1)", (user_id,))
+        user_plans = c.fetchall(); conn.close()
         if not user_plans: return await query.edit_message_text("မှတ်တမ်း မရှိသေးပါ။", reply_markup=BACK_TO_MAIN_MARKUP)
         try: client = get_outline_client(); all_keys = client.get_keys()
         except: return await query.edit_message_text(f"❌ Server Error.", reply_markup=BACK_TO_MAIN_MARKUP)
         msg = "👤 **လက်ရှိ Plan နှင့် မှတ်တမ်းများ**\n\n"
-        for ptype, dlimit, sdate, edate, current_bytes, is_active, exp_at, kid, prev_bytes in user_plans:
-            matched_key = next((k for k in all_keys if str(k.key_id) == str(kid)), None) if is_active == 1 else None
-            total_used_bytes = (int(getattr(matched_key, 'used_bytes', 0) or 0) if matched_key else current_bytes) + (prev_bytes or 0)
-            status_text = "🟢 **Active**" if is_active == 1 else "🔴 **Expired**"
-            msg += f"🔹 **Plan:** `{ptype}`\n📌 **Status:** {status_text}\n📅 **စဝယ်သည့်ရက်:** `{sdate[:10]}`\n⏳ **Exp:** `{edate[:10] if edate else 'No Exp'}`\n📊 **Usage:** `{total_used_bytes/1e9:.2f} GB` / `{dlimit/1e9:.2f} GB`" if dlimit else f"📊 **Usage:** `{total_used_bytes/1e9:.2f} GB`"
-            msg += f"\n🛑 **ရပ်စဲသည့်အချိန်:** `{exp_at}`\n---\n" if is_active == 0 and exp_at else "\n---\n"
+        for ptype, dlimit, sdate, edate, current_bytes, is_active, exp_at, kid, prev_bytes, ext_key in user_plans:
+            if str(kid).startswith('ext_'):
+                total_used_bytes = current_bytes + (prev_bytes or 0)
+                status_text = "🟢 **Active**" if is_active == 1 else "🔴 **Expired**"
+                msg += f"🔹 **Plan:** `{ptype}`\n📌 **Status:** {status_text}\n📅 **စဝယ်သည့်ရက်:** `{sdate[:10]}`\n⏳ **Exp:** `{edate[:10] if edate else 'No Exp'}`\n"
+                if dlimit: msg += f"📊 **Usage:** `{total_used_bytes/1e9:.2f} GB` / `{dlimit/1e9:.2f} GB`\n"
+                msg += f"🔑 **Key:** `{ext_key if ext_key else 'Key Not Found'}`"
+                msg += f"\n🛑 **ရပ်စဲသည့်အချိန်:** `{exp_at}`\n---\n" if is_active == 0 and exp_at else "\n---\n"
+            else:
+                matched_key = next((k for k in all_keys if str(k.key_id) == str(kid)), None) if is_active == 1 else None
+                total_used_bytes = (int(getattr(matched_key, 'used_bytes', 0) or 0) if matched_key else current_bytes) + (prev_bytes or 0)
+                status_text = "🟢 **Active**" if is_active == 1 else "🔴 **Expired**"
+                msg += f"🔹 **Plan:** `{ptype}`\n📌 **Status:** {status_text}\n📅 **စဝယ်သည့်ရက်:** `{sdate[:10]}`\n⏳ **Exp:** `{edate[:10] if edate else 'No Exp'}`\n📊 **Usage:** `{total_used_bytes/1e9:.2f} GB` / `{dlimit/1e9:.2f} GB`" if dlimit else f"📊 **Usage:** `{total_used_bytes/1e9:.2f} GB`"
+                msg += f"\n🛑 **ရပ်စဲသည့်အချိန်:** `{exp_at}`\n---\n" if is_active == 0 and exp_at else "\n---\n"
         await query.edit_message_text(text=msg, reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
 
-    # 🌟 RESTORED: User Selects Plan -> Save State 🌟
     elif data in plans_dict:
         context.user_data['pending_plan'] = data
         context.user_data['action_type'] = 'buy'
@@ -834,7 +854,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db_key = 'android_guide_file_id' if state == 'wait_up_android' else ('ios_guide_file_id' if state == 'wait_up_ios' else 'welcome_image_id')
         conn = get_db(); c = conn.cursor(); c.execute("INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (db_key, photo_id)); conn.commit(); conn.close()
         del context.user_data['state']; await update.message.reply_text("✅ ပုံသိမ်းပြီးပါပြီ©", reply_markup=BACK_TO_ADMIN_MARKUP)
-    # 🌟 RESTORED: User Submits Receipt -> Send Approve/Reject to Admin 🌟
     elif 'pending_plan' in context.user_data:
         plan = context.user_data.pop('pending_plan')
         action_type = context.user_data.pop('action_type', 'buy')
@@ -899,7 +918,7 @@ async def fb_approval_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         except Exception as e: await query.edit_message_caption(caption=f"❌ Error: {e}")
 
 async def check_expired_keys(context: ContextTypes.DEFAULT_TYPE):
-    conn = get_db(); c = conn.cursor(); now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_db(); c = conn.cursor(); now_str = get_mmt_now().strftime("%Y-%m-%d %H:%M:%S")
     c.execute("SELECT p.key_id, p.telegram_id, p.plan_type, u.username, p.end_date, p.data_limit, p.previous_used_bytes FROM plans p JOIN users u ON p.telegram_id = u.telegram_id WHERE p.is_active = 1")
     active_plans = c.fetchall()
     if active_plans:
@@ -912,7 +931,7 @@ async def check_expired_keys(context: ContextTypes.DEFAULT_TYPE):
                 except: pass
                 c.execute("UPDATE plans SET is_active = 0, expired_at = %s WHERE key_id = %s", (now_str, kid))
                 await context.bot.send_message(tid, "⚠️ **သက်တမ်းကုန်ဆုံးပါပြီ©**", reply_markup=BACK_TO_MAIN_MARKUP, parse_mode='Markdown')
-    c.execute("DELETE FROM plans WHERE is_active = 0 AND expired_at <= %s", ((datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d %H:%M:%S"),))
+    c.execute("DELETE FROM plans WHERE is_active = 0 AND expired_at <= %s", ((get_mmt_now() - timedelta(days=5)).strftime("%Y-%m-%d %H:%M:%S"),))
     conn.commit(); conn.close()
 
 async def post_init(application: Application):
