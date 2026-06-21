@@ -466,8 +466,10 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try: await context.bot.edit_message_caption(chat_id=adm_id, message_id=msg_id, caption=f"✅ <b>Approved & Key Sent:</b>\n<code>{html.escape(provided_key)}</code>", parse_mode='HTML')
             except: pass
 
+        # 2. User ထံသို့ Key ပေးပို့ခြင်း (သီးသန့်ခွဲပို့ခြင်း)
         try:
-            await context.bot.send_message(target_user_id, f"🎉 **ငွေသွင်းမှု အတည်ပြုပြီးပါပြီ©**\n\n👇 **အောက်ပါ Key ကို Copy ကူးပြီး Outline VPN တွင် ထည့်သွင်းအသုံးပြုနိုင်ပါပြီ©**\n\n`{provided_key}`", parse_mode='Markdown')
+            await context.bot.send_message(target_user_id, f"🎉 **ငွေသွင်းမှု အတည်ပြုပြီးပါပြီ©**\n\n👇 **အောက်ပါ Key ကို Copy ကူးပြီး Outline VPN တွင် ထည့်သွင်းအသုံးပြုနိုင်ပါပြီ©**", parse_mode='Markdown')
+            await context.bot.send_message(target_user_id, f"`{provided_key}`", parse_mode='Markdown')
         except: pass
 
         conn = get_db()
@@ -932,7 +934,6 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(CallbackQueryHandler(fb_approval_handler, pattern="^fb(app|rej)_"))
-    # 🌟 RESTORED: Admin Approval Callback Handler 🌟
     app.add_handler(CallbackQueryHandler(admin_approval_handler, pattern="^pay_(app|rej)_"))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
